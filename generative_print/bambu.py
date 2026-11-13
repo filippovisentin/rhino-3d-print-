@@ -46,6 +46,36 @@ def available():
     return os.path.exists(EXE) and os.path.isdir(PROFILES)
 
 
+FALLBACK_VOLUMES = {"Bambu Lab X1 Carbon 0.4 nozzle": [256.0, 256.0, 250.0],
+                    "Bambu Lab P1S 0.4 nozzle": [256.0, 256.0, 250.0],
+                    "Bambu Lab A1 mini 0.4 nozzle": [180.0, 180.0, 180.0],
+                    "Bambu Lab A1 0.4 nozzle": [256.0, 256.0, 256.0]}
+
+
+def printer_volume(printer):
+    """Volume di stampa [x, y, z] in mm, letto dal profilo Bambu se installato."""
+    try:
+        m = flatten("machine", printer)
+        pts = [tuple(float(c) for c in q.split("x")) for q in m["printable_area"]]
+        return [max(q[0] for q in pts) - min(q[0] for q in pts), max(q[1] for q in pts) - min(q[1] for q in pts),
+                float(m["printable_height"])]
+    except Exception:
+        return list(FALLBACK_VOLUMES.get(printer, [256.0, 256.0, 256.0]))
+
+
+def default_printer():
+    """Stampante preselezionata in Bambu Studio, se e tra quelle note; altrimenti la prima."""
+    try:
+        conf = os.path.join(os.environ.get("APPDATA", ""), "BambuStudio", "BambuStudio.conf")
+        with open(conf, encoding="utf-8", errors="replace") as fh:
+            m = re.search(r'"machine"\s*:\s*"([^"]+)"', fh.read())
+        if m and m.group(1) in PRINTERS:
+            return m.group(1)
+    except OSError:
+        pass
+    return next(iter(PRINTERS))
+
+
 def _index(kind):
     idx = {}
     for f in glob.glob(os.path.join(PROFILES, kind, "*.json")):
@@ -93,7 +123,13 @@ def overrides(params):
          "enable_arc_fitting": "0",          # solo segmenti G1: il G-code resta analizzabile
          "sparse_infill_density": "0%",
          "outer_wall_line_width": _s(lw), "inner_wall_line_width": _s(lw)}
-    if params.get("object") == "vase" and pr.get("mode") == "spiral":
+    if pr.get("generic"):
+        # solido qualsiasi dallo slicer interno: pareti, riempimento e strati pieni cosi come scelti
+        o.update({"spiral_mode": "0", "wall_loops": str(int(pr.get("walls", 2))),
+                  "sparse_infill_density": "%d%%" % int(round(100 * float(pr.get("infill", 0.15)))),
+                  "top_shell_layers": str(int(pr.get("top_layers", 5))),
+                  "bottom_shell_layers": str(int(pr.get("bottom_layers", 4))), "wall_generator": "arachne"})
+    elif params.get("object") == "vase" and pr.get("mode") == "spiral":
         o.update({"spiral_mode": "1", "wall_loops": "1", "top_shell_layers": "0",
                   "bottom_shell_layers": str(int(pr.get("bottom_layers", 4)))})
     else:
@@ -404,6 +440,7 @@ def main(argv=None):
                     help="soglia dei supporti in gradi dall'orizzontale (vuoto = valore del profilo Bambu)")
     ap.add_argument("--no-spiral", action="store_true", help="vaso a parete normale (per provare i supporti)")
     ap.add_argument("--save", default=None, help="salva il riassunto JSON anche in questo file")
+    ap.add_argument("--no-analysis", action="store_true", help="salta l'analisi del G-code (piu veloce)")
     a = ap.parse_args(argv)
     from . import generators
     with open(a.params, encoding="utf-8") as fh:
@@ -417,7 +454,7 @@ def main(argv=None):
         extra = {"enable_support": "1", "support_type": "normal(auto)"}
         if a.support_angle is not None:
             extra["support_threshold_angle"] = "%g" % a.support_angle
-    res = slice_stl(a.stl, params, out, a.printer, extra)
+    res = slice_stl(a.stl, params, out, a.printer, extra, analyse=not a.no_analysis)
     for path in [os.path.join(out, "slicer.json")] + ([a.save] if a.save else []):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(res, fh, indent=2, ensure_ascii=False)

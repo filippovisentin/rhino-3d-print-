@@ -88,3 +88,40 @@ def loops_profile(V, F, layer=0.2, step_mm=1.0):
     top = float(V[:, 2].max())
     zs = np.arange(layer / 2.0, top - layer / 2.0, max(step_mm, layer))
     return [(float(z), count_loops(V, F, z)) for z in zs]
+
+
+def hatch(loops, angle_deg, spacing, min_length=0.0):
+    """Tratteggio di riempimento dentro una regione piana (regola pari/dispari).
+
+    loops: lista di poligoni chiusi (N x 2, senza ripetere il primo punto) che delimitano la regione,
+    fori compresi. Restituisce i segmenti (K x 2 x 2) di rette parallele inclinate di angle_deg e
+    distanti 'spacing', tagliate dentro la regione. I tratti piu corti di min_length si scartano.
+    """
+    segs = []
+    for p in loops:
+        p = np.asarray(p, dtype=float)[:, :2]
+        if len(p) >= 3:
+            segs.append(np.stack([p, np.roll(p, -1, axis=0)], axis=1))
+    if not segs or spacing <= 0:
+        return np.zeros((0, 2, 2))
+    S = np.concatenate(segs)
+    a = math.radians(angle_deg)
+    c, s = math.cos(a), math.sin(a)
+    R = np.array([[c, s], [-s, c]])                     # porta la direzione del tratteggio sull'asse x
+    T = S @ R.T
+    y0, y1 = T[:, 0, 1], T[:, 1, 1]
+    lo, hi = float(min(y0.min(), y1.min())), float(max(y0.max(), y1.max()))
+    out = []
+    first = (math.floor(lo / spacing) + 0.5) * spacing
+    for y in np.arange(first, hi, spacing):
+        m = (y0 > y) != (y1 > y)
+        if not m.any():
+            continue
+        t = (y - y0[m]) / (y1[m] - y0[m])
+        xs = np.sort(T[m, 0, 0] + t * (T[m, 1, 0] - T[m, 0, 0]))
+        for k in range(0, len(xs) - 1, 2):
+            if xs[k + 1] - xs[k] >= min_length:
+                out.append([[xs[k], y], [xs[k + 1], y]])
+    if not out:
+        return np.zeros((0, 2, 2))
+    return np.array(out) @ R                             # torna nel sistema originale

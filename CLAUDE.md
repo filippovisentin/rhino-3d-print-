@@ -9,7 +9,8 @@ Strumento open source (MIT) di generative design per la stampa 3D FDM dentro Rhi
 - 2026-11-13: generatore del vaso (sezione a lobi o poligono raccordato con rotazione, capienza, modalità spirale con controllo dei contorni), corsa `runs/2026-11-13_vaso-esagonale` (3 iterazioni), modulo `deliver`, vaso in Grasshopper. 31 test.
 - 2026-11-13: confronto con uno slicer vero. `generative_print/bambu.py` affetta con Bambu Studio da riga di comando (profilo X1 Carbon 0.4) e analizza il G-code: peso, tempo, supporti, gap infill, sbalzo strato per strato, continuità della spirale. Risultati in `runs/*/final/slicer_bambu*.json` e nelle schede. 37 test.
 - 2026-11-13: limite di progetto sullo sbalzo portato a 43° (2° di margine), deciso dall'utente dopo che Bambu, a soglia 45°, metteva supporti alla lampada da 44,5°. Nuova correzione automatica `sculpt.relax_overhang` (lisciatura solo dove si supera il limite); lampada iterazione 9 = nuovo finale, 42,7°.
-- Da fare: prova di stampa reale; aggiornare PIANO.md (descrive il piano iniziale, superato in più punti).
+- 2026-11-13: slicer interno a Rhino (`rhino/gp_slicer.py`, avvio `rhino/avvia_slicer.py`): finestra con i parametri di stampa di qualsiasi oggetto selezionato, controlli, mappa degli sbalzi, anteprima degli strati con pareti e riempimento, pulsante per lo slicer vero (Bambu) e per la modifica plastica (QuadRemesh + editor a pennelli). Nucleo `printcheck.py`. 44 test. Obiettivo principale dell'utente da qui in avanti.
+- Da fare: vedi `RIPRESA.md` (limiti noti e prossimi passi); prova di stampa reale; aggiornare PIANO.md (descrive il piano iniziale, superato in più punti).
 
 ## Decisioni e vincoli
 - Rhino si pilota con il server MCP McNeel (Rhino-MCP-Platform 0.4.0). Si avvia con `Rhino.exe /nosplash /runscript="_MCPStart"`: l'avvio automatico del router fallisce.
@@ -21,6 +22,7 @@ Strumento open source (MIT) di generative design per la stampa 3D FDM dentro Rhi
 - La definizione .gh si costruisce da script (`grasshopper/build_definition.py`), non a mano; il componente Python 3 contiene solo un aggancio a `rhino/gp_gh.py`. In Rhino 8 `SetParametersFromScript` non crea ingressi: si registrano con `CreateParameter`.
 - Gli script lanciati via MCP devono rimettere ogni volta la cartella del progetto in `sys.path`.
 - Niente misure o test dichiarati senza averli eseguiti.
+- Per vedere una finestra Eto senza toccare lo schermo dell'utente: disegnarla in memoria con `RenderTargetBitmap` sul contenuto di `form.ControlObject`. Mai `CopyFromScreen`: cattura quello che l'utente ha in primo piano.
 - Slicer di confronto: Bambu Studio (installato, open source). La CLI accetta i profili solo come preset utente con `inherits` del profilo di sistema (senza: codice -17); codice -50 = pezzo fuori dal volume. Bambu ricentra e ruota leggermente il pezzo (circa 2,5°): le analisi usano solo il G-code, con archi disattivati. La soglia dei supporti di Bambu si misura dall'orizzontale. Pareti con Arachne (con le linee fisse le pareti inclinate generano molto gap infill). La stampante preselezionata dall'utente in Bambu è una A1 mini (180 mm): lampada e vaso demo non ci entrano.
 
 ## Note per Claude
