@@ -25,13 +25,13 @@ Oggetto finale della corsa `2026-11-13_vaso-esagonale` (iterazione 3). Unità: m
 | Ingombro | 125,5 x 127,9 x 200 mm | <= 256 x 256 x 256 | ok |
 | Appoggio sul piano | 5209 mm2 | >= 100 | ok |
 | Stabilita (baricentro dentro l'appoggio) | 38,8 mm | > 0 | ok |
-| Peso stimato | 65,1 g | <= 100 | ok |
+| Peso stimato | 61,4 g | <= 100 | ok |
 | Parete in spirale (una linea) | 0,7 mm | >= ugello 0.4 | ok |
 | Capienza | 1725 ml | >= 1500 | ok |
 | Un solo contorno per strato (spirale) | 0 quote fuori regola | 0 | ok |
 | Tenuta all'acqua (solo informativo) | non garantita  | non richiesta | ok |
 
-Peso stimato 65,1 g, circa 21,8 m di filo da 1,75 mm, 1000 strati da 0,2 mm. Tempo di stampa circa 2,4 h (stima grossolana).
+Peso stimato 61,4 g, circa 20,6 m di filo da 1,75 mm, 1000 strati da 0,2 mm. Tempo di stampa circa 2,3 h (stima grossolana).
 
 ## Stampa consigliata
 
@@ -44,5 +44,16 @@ Perché: a ogni quota c'è un solo contorno (verificato ogni mm), condizione nec
 La parete singola non è a tenuta d'acqua garantita: per fiori freschi serve un inserto o un rivestimento interno.
 
 
+## Confronto con lo slicer (Bambu Studio)
+Affettato da riga di comando con `python -m generative_print.bambu` (ricetta qui sopra, senza supporti). Riassunto completo in `slicer_bambu.json`.
+
+- Stampante Bambu Lab X1 Carbon 0.4 nozzle, Bambu Studio da riga di comando.
+- Peso 60.7 g (densita del profilo 1.26 g/cm3), 20.0 m di filo, 1001 strati, tempo 1h 15m 8s.
+- Gap infill: 0.0 m.
+- Sbalzo del muro esterno strato per strato (uno strato ogni 2, 499 controllati): sul 99% dei punti di ogni strato al massimo 36.5 gradi, 0 strati oltre il limite; picco assoluto 49.9 gradi a z 70.2 mm, 4 strati con almeno un punto oltre il limite; mediana 27.1 gradi.
+- Spirale tra z 1.2 e 199.8 mm: 138072 tratti, 0 spostamenti a vuoto, 0 ritrazioni, 0 discese di z: continua.
+- Volume di materiale: nostra stima 49,5 cm3, slicer 48,2 cm3 (+2.7%).
+- Tempo: nostra stima grossolana 2,3 h, slicer 1,3 h.
+
 ## Non verificato
-L'oggetto non è stato stampato né aperto in uno slicer. La densità del PLA (1,24 g/cm3) è un valore ipotizzato.
+L'oggetto non è stato stampato. La densità del PLA (1,24 g/cm3) è un valore ipotizzato; lo slicer usa quella del suo profilo.

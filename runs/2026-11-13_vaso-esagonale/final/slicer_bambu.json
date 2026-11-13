@@ -1,0 +1,71 @@
+{
+  "printer": "Bambu Lab X1 Carbon 0.4 nozzle",
+  "exit_code": 0,
+  "exit_text": "ok",
+  "ok": true,
+  "settings": {
+    "layer_height": "0.2",
+    "initial_layer_print_height": "0.2",
+    "enable_support": "0",
+    "enable_arc_fitting": "0",
+    "sparse_infill_density": "0%",
+    "outer_wall_line_width": "0.7",
+    "inner_wall_line_width": "0.7",
+    "spiral_mode": "1",
+    "wall_loops": "1",
+    "top_shell_layers": "0",
+    "bottom_shell_layers": "4"
+  },
+  "weight_g": 60.73,
+  "filament_m": 20.037560000000003,
+  "time_text": "1h 15m 8s",
+  "layers": 1001,
+  "density_g_cm3": 1.26,
+  "spiral_mode": true,
+  "wall_generator": "classic",
+  "arcs": false,
+  "time_h": 1.252,
+  "feature_m": {
+    "Bottom surface": 11.04,
+    "Custom": 0.36,
+    "Gap infill": 0.03,
+    "Internal solid infill": 26.85,
+    "Outer wall": 343.15,
+    "Top surface": 13.45
+  },
+  "support_m": 0.0,
+  "gap_infill_m": 0.03,
+  "slice_info": {
+    "prediction": 4528.0,
+    "weight": 60.73,
+    "warnings": []
+  },
+  "wall_overhang": {
+    "layers_checked": 499,
+    "every": 2,
+    "discontinuities_z": [],
+    "note": "distanza punto-segmento; campioni del muro superiore ogni 0.05 mm",
+    "max_deg": 49.9,
+    "z_max": 70.2,
+    "max_shift_mm": 0.238,
+    "median_deg": 27.1,
+    "layers_over_limit": 4,
+    "z_over_limit": [
+      67.8,
+      69.8,
+      70.2,
+      129.0
+    ],
+    "p99_max_deg": 36.5,
+    "p99_layers_over_limit": 0
+  },
+  "spiral": {
+    "z_from": 1.2,
+    "z_to": 199.8,
+    "segments": 138072,
+    "travel_moves": 0,
+    "retractions": 0,
+    "z_drops": 0,
+    "continuous": true
+  }
+}

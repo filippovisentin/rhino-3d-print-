@@ -264,6 +264,11 @@ def material(V, F, pr):
 
 
 # ---------------------------------------------------------------- vasi
+def line_section(width, height):
+    """Area della sezione di una linea estrusa (mm2): rettangolo con i due lati a semicerchio."""
+    return (float(width) - float(height) * (1.0 - math.pi / 4.0)) * float(height)
+
+
 def spiral_material(V, F, pr):
     """Materiale in modalita spirale: una linea sul contorno esterno di ogni strato
     piu gli strati pieni del fondo."""
@@ -281,7 +286,9 @@ def spiral_material(V, F, pr):
     length *= len(zs) / float(max(1, len(sampled)))
     _, areas, on_bed = overhang_angles(V, F)
     base_area = float(areas[on_bed].sum())              # area d'appoggio = fondo pieno
-    vol = length * lw * h + base_area * h * nb
+    # sezione della linea come la calcolano gli slicer (PrusaSlicer, Bambu): rettangolo con i lati
+    # arrotondati, (w - h(1 - pi/4)) * h; con w * h il peso esce piu alto di circa il 6% a 0,7 x 0,2 mm
+    vol = length * line_section(lw, h) + base_area * h * nb
     rho = float(pr["density_g_cm3"]) / 1000.0
     fil_area = math.pi * (float(pr["filament_diameter"]) / 2.0) ** 2
     return {"volume_cm3": vol_solid / 1000.0, "surface_cm2": 0.0, "mass_solid_g": vol_solid * rho,

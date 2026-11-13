@@ -76,7 +76,8 @@ def test_spiral_mode_is_a_filled_solid_with_one_loop_per_layer():
     assert ids["spiral"]["pass"]
     # una linea da 0,45 mm per 500 strati + 4 strati pieni del fondo
     lw, h = 0.45, 0.2
-    expected = (2 * math.pi * 40.0 * lw * 100.0 + math.pi * 40.0 ** 2 * h * 4) * 1.24 / 1000.0
+    section = (lw - h * (1 - math.pi / 4)) * h          # sezione della linea come negli slicer
+    expected = (2 * math.pi * 40.0 * (100.0 / h) * section + math.pi * 40.0 ** 2 * h * 4) * 1.24 / 1000.0
     assert res["material"]["mass_est_g"] == pytest.approx(expected, rel=0.01)
 
 

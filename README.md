@@ -31,7 +31,10 @@ python -m venv .venv
 .venv/Scripts/python -m generative_print.verify modello.stl --params params.json
 .venv/Scripts/python -m generative_print.journal runs/2026-11-13_lampada-nervature
 .venv/Scripts/python -m generative_print.deliver runs/2026-11-13_vaso-esagonale 3 vaso-esagonale
+.venv/Scripts/python -m generative_print.bambu runs/2026-11-13_vaso-esagonale/final/vaso-esagonale.stl runs/2026-11-13_vaso-esagonale/final/params.json
 ```
+
+Confronto con uno slicer vero: `generative_print.bambu` affetta l'STL con Bambu Studio (gratuito e open source, va installato a parte) da riga di comando, con la ricetta della scheda, e legge il G-code: peso, tempo, supporti, gap infill, sbalzo del muro strato per strato e continuità della spirale. Con `--support --support-angle 45` prova se lo slicer vuole supporti.
 
 Grasshopper: apri `grasshopper/generative_print.gh`. Il file trova da solo la cartella del progetto (deve restare in `grasshopper/`); se lo sposti, collega il percorso del progetto all'ingresso `cartella`. La definizione si rigenera con `grasshopper/build_definition.py`.
 
@@ -43,15 +46,15 @@ Ciclo guidato dall'agente: serve Rhino 8 con il pacchetto Rhino-MCP-Platform e i
 
 ## Struttura
 
-- `generative_print/`: nucleo in solo numpy (gira anche nel Python 3.9 di Rhino): `generators`, `checks`, `sculpt`, `slicer`, `mesh_io`, `verify`, `journal`, `deliver`.
+- `generative_print/`: nucleo in solo numpy (gira anche nel Python 3.9 di Rhino): `generators`, `checks`, `sculpt`, `slicer`, `mesh_io`, `verify`, `journal`, `deliver`, `bambu` (confronto con lo slicer, unico modulo che lancia un programma esterno).
 - `rhino/`: ponte con Rhino (`gp_rhino.py`), editor (`gp_editor.py`), calcolo del componente Grasshopper (`gp_gh.py`).
 - `grasshopper/`: definizione `.gh`, script del componente e script che la costruisce.
-- `tests/`: 31 test delle misure su solidi dal risultato noto (cubi, coni, cilindri, poligoni esatti).
+- `tests/`: 38 test delle misure su solidi dal risultato noto (cubi, coni, cilindri, poligoni esatti).
 - `runs/`: una cartella per corsa, con parametri, STL, metriche, viste e note di ogni iterazione.
 
 ## Limiti dichiarati
 
-- L'oggetto della demo non è stato stampato né aperto in uno slicer. Tempo e filo sono stime grossolane; la densità del PLA (1,24 g/cm³) è ipotizzata.
+- Gli oggetti della demo non sono stati stampati. Sono stati affettati in Bambu Studio (profilo X1 Carbon, ugello 0,4): il confronto è nelle schede in `final/`. Le nostre stime di tempo sono grossolane: fa fede lo slicer. La densità del PLA (1,24 g/cm³) è ipotizzata; il profilo Bambu usa 1,26.
 - La critica estetica è un giudizio del modello sulle viste, non una misura.
 - Nelle iterazioni 6-8 le pennellate sono state applicate dall'agente tramite script; il mouse è stato provato a parte.
 - I pennelli spostano i vertici senza cambiare la topologia: niente suddivisione dinamica.

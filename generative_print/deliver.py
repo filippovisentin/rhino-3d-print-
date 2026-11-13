@@ -35,7 +35,11 @@ def recipe(p, m):
             "rivestimento interno."]
     walls = max(2, int(round(float(p["wall"]["thickness"]) / float(pr["line_width"]))))
     return ["PLA, ugello %s mm, strato %s mm, %d perimetri (la parete da %s mm è fatta di soli perimetri), "
-            "nessun supporto." % (it(pr["nozzle"]), it(pr["layer"]), walls, it(p["wall"]["thickness"])),
+            "generatore di pareti **Arachne** (Bambu e Orca: \"Wall generator\"), nessun supporto."
+            % (it(pr["nozzle"]), it(pr["layer"]), walls, it(p["wall"]["thickness"])),
+            "Perché Arachne: tagliata in orizzontale, la parete inclinata è più larga del suo spessore "
+            "(spessore / cos dell'inclinazione). Con le linee fisse lo slicer riempie la differenza con molto "
+            "gap infill, più lento.",
             "Orientamento: fondo sul piano, così come esce il file.",
             "Perché: nessuna faccia supera i %s gradi di sbalzo (massimo misurato %s gradi)."
             % (it(pr["overhang_limit_deg"]), it(round(m["overhang"]["max_deg"], 1)))]
@@ -93,9 +97,32 @@ def deliver(run_dir, n, name):
     L += ["", "## Stampa consigliata", ""]
     for line in recipe(p, m):
         L += [line, ""]
+    sl_path = os.path.join(dst, "slicer_bambu.json")
+    if os.path.exists(sl_path):
+        from . import bambu
+        with open(sl_path, encoding="utf-8") as fh:
+            sl = json.load(fh)
+        L += ["", "## Confronto con lo slicer (Bambu Studio)",
+              "Affettato da riga di comando con `python -m generative_print.bambu` (ricetta qui sopra, "
+              "senza supporti). Riassunto completo in `slicer_bambu.json`.", ""]
+        L += ["- " + line for line in bambu.summary_lines(sl)]
+        if mat and sl.get("ok"):
+            vol_ours = mat["mass_est_g"] / float(p["print"]["density_g_cm3"])
+            vol_slicer = sl["weight_g"] / float(sl.get("density_g_cm3", 1.24))
+            L.append("- Volume di materiale: nostra stima %s cm3, slicer %s cm3 (%+.1f%%)."
+                     % (it(round(vol_ours, 1)), it(round(vol_slicer, 1)), 100.0 * (vol_ours / vol_slicer - 1.0)))
+            L.append("- Tempo: nostra stima grossolana %s h, slicer %s h."
+                     % (it(round(mat["time_h_rough"], 1)), it(round(sl.get("time_h", 0.0), 1))))
+        sup = os.path.join(dst, "slicer_bambu_supporti45.json")
+        if os.path.exists(sup):
+            with open(sup, encoding="utf-8") as fh:
+                s45 = json.load(fh)
+            L.append("- Con i supporti automatici a soglia 45 gradi lo slicer genera %s m di supporto "
+                     "(con la soglia predefinita del profilo, 30 gradi dall'orizzontale, nessuno)."
+                     % it(round(s45.get("support_m", 0.0), 1)))
     L += ["", "## Non verificato",
-          "L'oggetto non è stato stampato né aperto in uno slicer. La densità del PLA (%s g/cm3) è un valore "
-          "ipotizzato." % it(p["print"]["density_g_cm3"])]
+          "L'oggetto non è stato stampato. La densità del PLA (%s g/cm3) è un valore ipotizzato; "
+          "lo slicer usa quella del suo profilo." % it(p["print"]["density_g_cm3"])]
     with open(os.path.join(dst, "scheda.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(L) + "\n")
     return dst, m
