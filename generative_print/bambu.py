@@ -39,11 +39,27 @@ PRINTERS = {
 }
 # codici di uscita della CLI osservati
 EXIT_CODES = {0: "ok", -17: "processo non compatibile con la stampante",
-              -50: "il pezzo non entra nel volume di stampa"}
+              -50: "il pezzo non entra nel volume di stampa",
+              -61: "materiale non ammesso sul tipo di piatto (visto con PETG sul Cool Plate)"}
 
 
 def available():
     return os.path.exists(EXE) and os.path.isdir(PROFILES)
+
+
+FILAMENTS = {"PLA": "Bambu PLA Basic", "PETG": "Bambu PETG Basic", "ABS": "Bambu ABS", "ASA": "Bambu ASA",
+             "TPU": "Bambu TPU 95A"}
+
+
+def filament_profile(printer, material="PLA"):
+    """Nome del profilo di filamento Bambu per quel materiale su quella stampante; se non esiste
+    (per esempio PETG sulla A1 mini) torna il PLA della stampante."""
+    pla = PRINTERS[printer][1]
+    suffix = pla[pla.index("@"):]
+    name = "%s %s" % (FILAMENTS.get(material, FILAMENTS["PLA"]), suffix)
+    if name != pla and not os.path.exists(os.path.join(PROFILES, "filament", name + ".json")):
+        return pla
+    return name
 
 
 FALLBACK_VOLUMES = {"Bambu Lab X1 Carbon 0.4 nozzle": [256.0, 256.0, 250.0],
@@ -121,6 +137,7 @@ def overrides(params):
     o = {"layer_height": _s(h), "initial_layer_print_height": _s(h),
          "enable_support": "0",
          "enable_arc_fitting": "0",          # solo segmenti G1: il G-code resta analizzabile
+         "curr_bed_type": "Textured PEI Plate",   # ammette PLA, PETG, ABS, ASA e TPU (il Cool Plate no)
          "sparse_infill_density": "0%",
          "outer_wall_line_width": _s(lw), "inner_wall_line_width": _s(lw)}
     if pr.get("generic"):
@@ -143,8 +160,9 @@ def overrides(params):
     return o
 
 
-def prepare(out_dir, printer, params, extra=None):
-    proc_name, fil_name = PRINTERS[printer]
+def prepare(out_dir, printer, params, extra=None, material="PLA"):
+    proc_name = PRINTERS[printer][0]
+    fil_name = filament_profile(printer, material)
     m = flatten("machine", printer)
     p = flatten("process", proc_name)
     f = flatten("filament", fil_name)
@@ -160,12 +178,12 @@ def prepare(out_dir, printer, params, extra=None):
 
 
 def slice_stl(stl, params, out_dir, printer="Bambu Lab X1 Carbon 0.4 nozzle", extra=None, timeout=900,
-              analyse=True):
+              analyse=True, material="PLA"):
     """Affetta e restituisce il riassunto; il G-code resta in out_dir/plate_1.gcode."""
     from . import mesh_io
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    mach, proc, fil = prepare(out_dir, printer, params, extra)
+    mach, proc, fil = prepare(out_dir, printer, params, extra, material)
     out3mf = os.path.join(out_dir, "affettato.3mf")
     if os.path.exists(out3mf):
         os.remove(out3mf)
@@ -188,7 +206,7 @@ def slice_stl(stl, params, out_dir, printer="Bambu Lab X1 Carbon 0.4 nozzle", ex
     with open(os.path.join(out_dir, "bambu_log.txt"), "w", encoding="utf-8") as fh:
         fh.write("CMD " + " ".join(cmd) + "\nEXIT %d\n" % r.returncode + (r.stdout or "") + (r.stderr or ""))
     code = r.returncode - (1 << 32) if r.returncode >= (1 << 31) else r.returncode
-    res = {"printer": printer, "exit_code": code, "exit_text": EXIT_CODES.get(code, "vedi bambu_log.txt"),
+    res = {"printer": printer, "filament": filament_profile(printer, material), "exit_code": code, "exit_text": EXIT_CODES.get(code, "vedi bambu_log.txt"),
            "ok": code == 0 and os.path.exists(out3mf), "settings": dict(overrides(params), **(extra or {}))}
     if not res["ok"]:
         return res
@@ -404,7 +422,8 @@ def summary_lines(res):
     """Righe in italiano per scheda e terminale."""
     if not res.get("ok"):
         return ["Bambu Studio non ha affettato il pezzo: codice %s (%s)." % (res.get("exit_code"), res.get("exit_text"))]
-    L = ["Stampante %s, Bambu Studio da riga di comando." % res["printer"],
+    L = ["Stampante %s, filamento %s, Bambu Studio da riga di comando."
+         % (res["printer"], res.get("filament", "PLA del profilo")),
          "Peso %.1f g (densita del profilo %s g/cm3), %.1f m di filo, %d strati, tempo %s."
          % (res["weight_g"], res.get("density_g_cm3", "?"), res["filament_m"], res["layers"], res["time_text"])]
     if res.get("support_m"):
@@ -441,6 +460,7 @@ def main(argv=None):
     ap.add_argument("--no-spiral", action="store_true", help="vaso a parete normale (per provare i supporti)")
     ap.add_argument("--save", default=None, help="salva il riassunto JSON anche in questo file")
     ap.add_argument("--no-analysis", action="store_true", help="salta l'analisi del G-code (piu veloce)")
+    ap.add_argument("--material", default="PLA", help="PLA, PETG, ABS, ASA o TPU (se manca il profilo: PLA)")
     a = ap.parse_args(argv)
     from . import generators
     with open(a.params, encoding="utf-8") as fh:
@@ -454,7 +474,7 @@ def main(argv=None):
         extra = {"enable_support": "1", "support_type": "normal(auto)"}
         if a.support_angle is not None:
             extra["support_threshold_angle"] = "%g" % a.support_angle
-    res = slice_stl(a.stl, params, out, a.printer, extra, analyse=not a.no_analysis)
+    res = slice_stl(a.stl, params, out, a.printer, extra, analyse=not a.no_analysis, material=a.material)
     for path in [os.path.join(out, "slicer.json")] + ([a.save] if a.save else []):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(res, fh, indent=2, ensure_ascii=False)

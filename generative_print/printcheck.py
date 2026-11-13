@@ -104,6 +104,9 @@ def analyse(V, F, over=None, raycast=None, support_spacing=3.0):
     bed = [float(b) for b in s["bed"]]
     fits = (size[2] <= bed[2] + 1e-6) and ((size[0] <= bed[0] + 1e-6 and size[1] <= bed[1] + 1e-6)
                                            or (size[1] <= bed[0] + 1e-6 and size[0] <= bed[1] + 1e-6))
+    # di quanto andrebbe ridotto per entrare (1 = entra gia), provando i due versi sul piano
+    fit_scale = min(1.0, max(min(bed[0] / size[0], bed[1] / size[1]), min(bed[1] / size[0], bed[0] / size[1])),
+                    bed[2] / size[2])
     ang, areas, on_bed = checks.overhang_angles(V, F)
     free = ~on_bed & (areas > 1e-9)
     over_mask = free & (ang > lim + checks.ANGLE_TOL)
@@ -122,7 +125,7 @@ def analyse(V, F, over=None, raycast=None, support_spacing=3.0):
                                                               "  -> con supporti" if over_area > 1.0 and sup_on else "")),
             ("Isole", islands == 0 or sup_on, "%d partenze nel vuoto" % islands),
             ("Appoggio", contact >= 100.0, "%.0f mm2 sul piano" % contact)]
-    out = {"settings": s, "lift_mm": lift, "size": [float(x) for x in size], "closed": closed, "fits": bool(fits),
+    out = {"settings": s, "lift_mm": lift, "fit_scale": float(fit_scale), "size": [float(x) for x in size], "closed": closed, "fits": bool(fits),
            "overhang_max_deg": max_deg, "overhang_area_mm2": over_area, "islands": islands,
            "contact_mm2": contact, "needs_support": bool(needs_support),
            "over_mask": over_mask, "warn_mask": warn_mask,
@@ -170,6 +173,9 @@ def report(res):
                         round(100 * SUPPORT_DENSITY)))
     else:
         L.append("Mesh aperta: volume, peso e tempo non calcolabili. Chiudi il solido.")
+    if not res["fits"]:
+        L.append("NON ENTRA nella stampante: andrebbe ridotto al %d%% (oppure prova un altro orientamento)."
+                 % int(math.floor(100 * res["fit_scale"])))
     if res["needs_support"] and not res["settings"]["supports"]:
         L.append("ATTENZIONE: servono supporti (zone rosse) oppure va cambiato l'orientamento.")
     L.append("ESITO: %s" % ("STAMPABILE" if res["ok"] else "DA CORREGGERE"))

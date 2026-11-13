@@ -38,7 +38,7 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 
 - Pareti e riempimento della vista sono un'**anteprima geometrica**, non un percorso di stampa: niente G-code nostro, niente ordine dei tratti, niente ritrazioni. Peso e tempo precisi li dà Bambu.
 - Gli strati pieni sono solo i primi e gli ultimi dell'oggetto intero: le superfici piane a metà altezza non vengono riconosciute.
-- Il pulsante Bambu usa sempre il profilo «PLA Basic»: il materiale scelto nella finestra cambia solo la densità della nostra stima.
+- Il pulsante Bambu passa il materiale scelto solo se esiste il profilo per quella stampante (PETG, ABS e ASA mancano sulla A1 mini): altrimenti usa il PLA e lo scrive nel rapporto. Si affetta sempre sul piatto PEI ruvido, perché il Cool Plate rifiuta il PETG (codice -61). Provato: PETG su X1 Carbon, staffa 23,7 g, 1 h 11 min.
 - Con i supporti spenti Bambu affetta lo stesso anche un pezzo che ne avrebbe bisogno (la staffa): l'avviso è nel nostro rapporto, non nel suo.
 - La maglia per scolpire arrotonda leggermente gli spigoli vivi e ha qualche irregolarità sui bordi (visto sulla staffa a 1,5 mm di lato).
 - I supporti in anteprima sono colonne verticali su una griglia: non il disegno vero dei supporti (ad albero o a griglia) dello slicer.
@@ -52,10 +52,9 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 1. Provare la finestra a mano (mouse) e correggere ciò che non torna.
 2. Modifica plastica: suddivisione dove serve dettaglio, spigoli vivi conservati nella maglia da scolpire, pennello che corregge anche gli sbalzi già presenti (oggi tocca solo la zona scolpita).
 3. Strati pieni locali (superfici piane a metà altezza) nell'anteprima.
-4. Materiale scelto nella finestra passato anche a Bambu (profili PETG, ABS...).
-5. Scala e disposizione sul piatto (più pezzi, «riduci per entrare nella stampante»).
-6. Comando con nome in Rhino (alias `GPSlicer`): tocca le impostazioni di Rhino dell'utente, quindi chiedere prima.
-7. Aggiornare o togliere `PIANO.md`.
+4. Scala e disposizione sul piatto: oggi il rapporto dice solo di quanto ridurre («andrebbe ridotto al NN %»), non scala né dispone più pezzi.
+5. Comando con nome in Rhino (alias `GPSlicer`): tocca le impostazioni di Rhino dell'utente, quindi chiedere prima.
+6. Aggiornare o togliere `PIANO.md`.
 
 ## Come ripartire
 

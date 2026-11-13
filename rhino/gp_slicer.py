@@ -498,7 +498,8 @@ class Slicer(object):
         if os.path.exists(self.bambu_json):
             os.remove(self.bambu_json)
         cmd = [exe, "-m", "generative_print.bambu", stl, pjson, "--printer", self.printer,
-               "--out", os.path.join(out, "bambu"), "--no-analysis"] + (["--support"] if s["supports"] else [])
+               "--out", os.path.join(out, "bambu"), "--no-analysis", "--material", self.material_name] \
+            + (["--support"] if s["supports"] else [])
         env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
         self.proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, creationflags=0x08000000)
@@ -528,8 +529,11 @@ class Slicer(object):
             lines = bambu.summary_lines(self.bambu_result)
             r, b = self.result, self.bambu_result
             if b.get("ok") and r and "mass_g" in r:
-                lines.append("Confronto: la nostra stima era %.1f g e %.1f h (densita %g; il profilo Bambu e PLA Basic)."
+                lines.append("Confronto: la nostra stima era %.1f g e %.1f h (densita %g)."
                              % (r["mass_g"], r["time_h"], self.settings["density_g_cm3"]))
+                if self.material_name not in b.get("filament", ""):
+                    lines.append("Nota: per %s non c'e un profilo Bambu su questa stampante, ha usato %s."
+                                 % (self.material_name, b.get("filament")))
         else:
             lines = ["non ha prodotto un risultato:"] + text.splitlines()[-4:]
         self.extra += ["Bambu (%d s): %s" % (time.time() - self.t0, lines[0])] + ["Bambu: " + l for l in lines[1:]]
