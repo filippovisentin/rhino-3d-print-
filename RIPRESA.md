@@ -16,8 +16,8 @@ Fatto e provato in Rhino 8 in questa sessione:
   - Pulsanti: «Verifica spessori», «Affetta con Bambu Studio» (slicer vero, in background), «Esporta STL», «Modifica plastica».
   - **Orientamento**: «Ruota X 90», «Ruota Y 90», «Migliore» (prova i sei assi e le facce piane più estese, sceglie meno sbalzo, poi più appoggio), «Come disegnato», «Applica al modello» (ruota davvero gli oggetti di Rhino, un passo di Annulla). Finché non si applica, il modello non cambia.
   - **Supporti in anteprima**: con «Supporti» acceso, colonne verdi ogni 3 mm sotto le facce oltre soglia, fino al piano o al pezzo sotto; il volume entra nella stima del peso (riempimento ipotizzato al 12 %).
-- **Modifica plastica su oggetti qualsiasi**: il pulsante converte l'oggetto in una maglia regolare (QuadRemesh) e apre l'editor a pennelli già esistente (`rhino/gp_editor.py`: Tira/Spingi, Gonfia, Liscia, Appiattisci, Pizzica, Afferra). L'originale resta nascosto, non viene cancellato. Nell'editor c'è la nuova opzione **«Rispetta il limite di sbalzo mentre scolpisco»**: a fine pennellata la zona toccata viene lisciata finché rientra nel limite (`sculpt.relax_overhang_mesh`).
-- **Nucleo**: `generative_print/printcheck.py` (analisi di un solido qualsiasi), `slicer.hatch` (tratteggio del riempimento), impostazioni generiche e volume della stampante in `bambu.py`. 47 test passano (`.venv/Scripts/python -m pytest -q tests`).
+- **Modifica plastica su oggetti qualsiasi**: il pulsante converte l'oggetto in una maglia regolare (QuadRemesh) e apre l'editor a pennelli già esistente (`rhino/gp_editor.py`: Tira/Spingi, Gonfia, Liscia, Appiattisci, Pizzica, Afferra). L'originale resta nascosto, non viene cancellato. Nell'editor c'è la nuova opzione **«Rispetta il limite di sbalzo mentre scolpisco»**: a fine pennellata la zona toccata viene lisciata finché rientra nel limite (`sculpt.relax_overhang_mesh`). C'è anche la **simmetria a specchio** (X o Y) rispetto al centro dell'oggetto; la simmetria radiale ora ruota attorno a quel centro e non all'origine del mondo.
+- **Nucleo**: `generative_print/printcheck.py` (analisi di un solido qualsiasi), `slicer.hatch` (tratteggio del riempimento), impostazioni generiche e volume della stampante in `bambu.py`. 48 test passano (`.venv/Scripts/python -m pytest -q tests`).
 
 Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e braccio a sbalzo):
 
@@ -31,6 +31,7 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 | Lampada (guscio 1,35 mm, 113.280 triangoli) | 3 linee di parete, come i 3 perimetri di Bambu; analisi 2,5 s; uno strato 0,2–0,4 s |
 | Orientamento «Migliore» sulla staffa | schiena in giù: sbalzo da 1600 a 81 mm² (resta l'arco alto del foro) |
 | Staffa con supporti | nostra stima 36,1 g (196 colonne, 9,0 cm³); Bambu con supporti 37,7 g, 53 min 53 s |
+| Specchio Y sulla staffa (centro 30, 20) | 117 punti mossi per lato, simmetrici |
 | Pennellata con e senza «Rispetta il limite» | senza: 50,9° e 60 mm² oltre soglia; con: 42,4° e 0 mm² (43 punti corretti) |
 
 ## Limiti noti (non nascondere)
@@ -49,7 +50,7 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 ## Prossimi passi proposti
 
 1. Provare la finestra a mano (mouse) e correggere ciò che non torna.
-2. Modifica plastica: simmetria a specchio, suddivisione dove serve dettaglio, spigoli vivi conservati nella maglia da scolpire.
+2. Modifica plastica: suddivisione dove serve dettaglio, spigoli vivi conservati nella maglia da scolpire, pennello che corregge anche gli sbalzi già presenti (oggi tocca solo la zona scolpita).
 3. Strati pieni locali (superfici piane a metà altezza) nell'anteprima.
 4. Materiale scelto nella finestra passato anche a Bambu (profili PETG, ABS...).
 5. Scala e disposizione sul piatto (più pezzi, «riduci per entrare nella stampante»).

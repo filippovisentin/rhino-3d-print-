@@ -64,6 +64,9 @@ class Session(object):
         self.radius = 18.0
         self.strength = 0.5          # 0..1 dal cursore del pannello
         self.symmetry = 1
+        self.mirror = None           # None, "x" oppure "y": specchio rispetto al centro dell'oggetto
+        c = (self.V.max(axis=0) + self.V.min(axis=0)) / 2.0
+        self.centre = (0.0, 0.0) if self.kind == "skin" else (float(c[0]), float(c[1]))
         self.heatmap = True
         self.layer_z = None
         self.layer_lines = []
@@ -187,7 +190,8 @@ class Session(object):
         brush = brush or self.brush
         amount = self.dab_amount(brush, invert) if amount is None else amount
         moved = []
-        for c, _ in sculpt.radial_copies(np.asarray(center, dtype=float), None, self.symmetry):
+        for c, _ in sculpt.symmetry_copies(np.asarray(center, dtype=float), None, self.symmetry,
+                                           self.mirror, self.centre):
             idx = sculpt.dab(self.V, self.normals, self.edges, c, self.radius, amount, brush)
             if len(idx):
                 moved.append(idx)
@@ -224,7 +228,7 @@ class Session(object):
     def grab_begin(self, view, point, hit):
         cam = view.ActiveViewport.CameraDirection
         plane = rg.Plane(rg.Point3d(hit[0], hit[1], hit[2]), cam)
-        copies = sculpt.radial_copies(hit, None, self.symmetry)
+        copies = sculpt.symmetry_copies(hit, None, self.symmetry, self.mirror, self.centre)
         sets = []
         for c, _ in copies:
             d = np.linalg.norm(self.V - c, axis=1)
@@ -242,7 +246,8 @@ class Session(object):
         delta = np.array([p.X, p.Y, p.Z]) - g["anchor"]
         self.V[:] = g["V0"]
         moved = []
-        for (idx, w), (_, dv) in zip(g["sets"], sculpt.radial_copies(g["anchor"], delta, self.symmetry)):
+        for (idx, w), (_, dv) in zip(g["sets"], sculpt.symmetry_copies(g["anchor"], delta, self.symmetry,
+                                                                        self.mirror, self.centre)):
             self.V[idx] += dv * w
             moved.append(idx)
         sculpt.constrain(self.V, self.base_ring)
@@ -552,6 +557,11 @@ class Editor(object):
         self.w_radius.ValueChanged += lambda s, e: self.guard(self.on_settings)
         self.w_strength.ValueChanged += lambda s, e: self.guard(self.on_settings)
         self.w_sym.ValueChanged += lambda s, e: self.guard(self.on_settings)
+        self.w_mirror = ef.DropDown()
+        for text in ("Nessuno", "Specchio X (sinistra / destra)", "Specchio Y (davanti / dietro)"):
+            self.w_mirror.Items.Add(text)
+        self.w_mirror.SelectedIndex = 0
+        self.w_mirror.SelectedIndexChanged += lambda s, e: self.guard(self.on_settings)
         self.w_heat.CheckedChanged += lambda s, e: self.guard(self.on_heat)
         self.w_layers.CheckedChanged += lambda s, e: self.guard(self.on_layers)
         self.w_layer.ValueChanged += lambda s, e: self.guard(self.on_layers)
@@ -563,6 +573,7 @@ class Editor(object):
         lay.AddRow(self.w_radius_l, self.w_radius)
         lay.AddRow(self.w_strength_l, self.w_strength)
         lay.AddRow(label("Simmetria radiale (copie)"), self.w_sym)
+        lay.AddRow(label("Simmetria a specchio"), self.w_mirror)
         lay.AddRow(self.w_heat)
         lay.AddRow(self.w_respect)
         lay.AddRow(self.w_layers, self.w_layer)
@@ -616,6 +627,7 @@ class Editor(object):
         s.strength = self.w_strength.Value / 100.0
         s.symmetry = int(self.w_sym.Value)
         s.respect = bool(self.w_respect.Checked)
+        s.mirror = (None, "x", "y")[max(0, self.w_mirror.SelectedIndex)]
         self.w_radius_l.Text = "Raggio %d mm" % self.w_radius.Value
         self.w_strength_l.Text = "Forza %d %%" % self.w_strength.Value
 

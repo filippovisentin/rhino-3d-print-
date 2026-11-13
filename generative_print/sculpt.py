@@ -43,6 +43,26 @@ def radial_copies(point, vector, count):
     return out
 
 
+def symmetry_copies(point, vector, count=1, mirror=None, centre=(0.0, 0.0)):
+    """Copie del colpo: 'count' copie ruotate attorno all'asse verticale che passa per 'centre', poi
+    (mirror = "x" oppure "y") le speculari rispetto al piano verticale x = centre[0] o y = centre[1].
+    Un colpo che sta sul piano di specchio non viene raddoppiato."""
+    c3 = np.array([centre[0], centre[1], 0.0])
+    point = np.asarray(point, dtype=float)
+    out = [(p + c3, v) for p, v in radial_copies(point - c3, vector, count)]
+    if mirror in ("x", "y"):
+        k = 0 if mirror == "x" else 1
+        flip = np.ones(3)
+        flip[k] = -1.0
+        extra = []
+        for p, v in out:
+            q = (p - c3) * flip + c3
+            if all(np.linalg.norm(q - o) > 1e-6 for o, _ in out):
+                extra.append((q, v * flip if v is not None else None))
+        out += extra
+    return out
+
+
 def dab(V, normals, edges, center, radius, strength, brush="draw", direction=None,
         locked=None, grab_delta=None):
     """Applica un colpo di pennello in-place. Restituisce gli indici dei vertici mossi.

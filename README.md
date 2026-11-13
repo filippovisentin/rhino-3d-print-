@@ -52,7 +52,7 @@ Ciclo guidato dall'agente: serve Rhino 8 con il pacchetto Rhino-MCP-Platform e i
 - `generative_print/`: nucleo in solo numpy (gira anche nel Python 3.9 di Rhino): `generators`, `checks`, `sculpt`, `slicer`, `mesh_io`, `verify`, `journal`, `deliver`, `printcheck` (analisi di un solido qualsiasi), `bambu` (confronto con lo slicer, unico modulo che lancia un programma esterno).
 - `rhino/`: ponte con Rhino (`gp_rhino.py`), slicer interno (`gp_slicer.py`), editor (`gp_editor.py`), calcolo del componente Grasshopper (`gp_gh.py`).
 - `grasshopper/`: definizione `.gh`, script del componente e script che la costruisce.
-- `tests/`: 47 test delle misure su solidi dal risultato noto (cubi, coni, cilindri, poligoni esatti).
+- `tests/`: 48 test delle misure su solidi dal risultato noto (cubi, coni, cilindri, poligoni esatti).
 - `runs/`: una cartella per corsa, con parametri, STL, metriche, viste e note di ogni iterazione.
 
 ## Limiti dichiarati

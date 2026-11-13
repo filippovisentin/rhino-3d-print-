@@ -210,3 +210,18 @@ def test_relax_overhang_mesh_fixes_only_the_sculpted_region():
     far = np.linalg.norm(before - side, axis=1) > 30.0     # lontano dal colpo non cambia niente
     assert np.allclose(V[far], before[far])
     assert checks.topology(V, F)["watertight"]
+
+
+def test_symmetry_copies_radial_and_mirror():
+    from generative_print import sculpt
+    c = (10.0, 5.0)
+    p, v = np.array([14.0, 5.0, 20.0]), np.array([1.0, 0.0, 0.5])
+    rad = sculpt.symmetry_copies(p, v, 4, None, c)
+    assert len(rad) == 4
+    assert np.allclose(sorted(tuple(np.round(q, 6)) for q, _ in rad),
+                       sorted([(14, 5, 20), (10, 9, 20), (6, 5, 20), (10, 1, 20)]))
+    mir = sculpt.symmetry_copies(np.array([14.0, 8.0, 20.0]), v, 1, "x", c)
+    assert len(mir) == 2 and np.allclose(mir[1][0], [6.0, 8.0, 20.0]) and np.allclose(mir[1][1], [-1.0, 0.0, 0.5])
+    on_plane = sculpt.symmetry_copies(np.array([10.0, 8.0, 20.0]), v, 1, "x", c)
+    assert len(on_plane) == 1                              # sul piano di specchio: nessun doppione
+    assert len(sculpt.symmetry_copies(np.array([14.0, 8.0, 20.0]), None, 1, "y", c)) == 2
