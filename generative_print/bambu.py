@@ -127,6 +127,7 @@ def slice_stl(stl, params, out_dir, printer="Bambu Lab X1 Carbon 0.4 nozzle", ex
               analyse=True):
     """Affetta e restituisce il riassunto; il G-code resta in out_dir/plate_1.gcode."""
     from . import mesh_io
+    out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     mach, proc, fil = prepare(out_dir, printer, params, extra)
     out3mf = os.path.join(out_dir, "affettato.3mf")
