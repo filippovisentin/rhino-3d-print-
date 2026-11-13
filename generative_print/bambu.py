@@ -146,7 +146,8 @@ def slice_stl(stl, params, out_dir, printer="Bambu Lab X1 Carbon 0.4 nozzle", ex
     cmd = [EXE, "--slice", "0",
            "--load-settings", mach + ";" + proc, "--load-filaments", fil,
            "--outputdir", out_dir, "--export-3mf", "affettato.3mf", placed]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    # cwd = out_dir: la CLI scrive result.json nella cartella corrente
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=out_dir)
     with open(os.path.join(out_dir, "bambu_log.txt"), "w", encoding="utf-8") as fh:
         fh.write("CMD " + " ".join(cmd) + "\nEXIT %d\n" % r.returncode + (r.stdout or "") + (r.stderr or ""))
     code = r.returncode - (1 << 32) if r.returncode >= (1 << 31) else r.returncode
