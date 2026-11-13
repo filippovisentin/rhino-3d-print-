@@ -66,3 +66,24 @@ def test_generic_overrides_and_printer_volume():
     assert o["top_shell_layers"] == "6" and o["bottom_shell_layers"] == "5" and o["spiral_mode"] == "0"
     assert bambu.printer_volume("stampante sconosciuta") == [256.0, 256.0, 256.0]
     assert bambu.default_printer() in bambu.PRINTERS
+
+
+def test_best_orientation_flips_the_table():
+    """Tavolo (piano su una gamba): capovolto, col piano in basso, non ha piu sbalzi."""
+    Va, Fa = box(10, 10, 30)
+    Vb, Fb = box(60, 60, 5, z0=30)
+    Vb = Vb - [25, 25, 0]
+    V, F = np.vstack([Va, Vb]), np.vstack([Fa, Fb + 8])
+    ranked = printcheck.orientations(V, F)
+    best = ranked[0]
+    # le due scatole sono sovrapposte, non unite: dentro resta la faccia superiore della gamba
+    # (100 mm2), che capovolta guarda in giu. Tutto il resto dello sbalzo (3600 mm2) sparisce.
+    assert best["down"] == [0.0, 0.0, 1.0] and best["overhang_area_mm2"] == pytest.approx(100.0)
+    assert best["contact_mm2"] == pytest.approx(3600.0)
+    as_drawn = [o for o in ranked if o["down"] == [0.0, 0.0, -1.0]][0]
+    assert as_drawn["overhang_area_mm2"] == pytest.approx(3600.0)   # tutto il sotto del piano
+    W = printcheck.rotate(V, best["R"])
+    assert W[:, 2].min() == pytest.approx(V[:, 2].min())            # resta appoggiato alla stessa quota
+    R = printcheck.rotation_to_down([1.0, 0.0, 0.0])
+    assert np.allclose(R @ np.array([1.0, 0.0, 0.0]), [0, 0, -1]) and np.allclose(R @ R.T, np.eye(3))
+    assert np.linalg.det(R) == pytest.approx(1.0)

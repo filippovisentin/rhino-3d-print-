@@ -121,3 +121,72 @@ def report(res):
         L.append("ATTENZIONE: servono supporti (zone rosse) oppure va cambiato l'orientamento.")
     L.append("ESITO: %s" % ("STAMPABILE" if res["ok"] else "DA CORREGGERE"))
     return "\n".join(L)
+
+
+# ---------------------------------------------------------------- orientamento
+def rotation_to_down(d):
+    """Matrice 3x3 che porta la direzione d (del modello) a puntare verso il basso (0, 0, -1)."""
+    d = np.asarray(d, dtype=float)
+    d = d / np.linalg.norm(d)
+    t = np.array([0.0, 0.0, -1.0])
+    c = float(np.dot(d, t))
+    if c > 1.0 - 1e-12:
+        return np.eye(3)
+    if c < -1.0 + 1e-12:
+        return np.diag([1.0, -1.0, -1.0])               # mezzo giro attorno a x
+    v = np.cross(d, t)
+    K = np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]])
+    return np.eye(3) + K + K @ K / (1.0 + c)
+
+
+def rotate(V, R):
+    """Ruota attorno al centro dell'ingombro e riappoggia alla quota minima di partenza."""
+    V = np.asarray(V, dtype=float)
+    c = (V.max(axis=0) + V.min(axis=0)) / 2.0
+    W = (V - c) @ np.asarray(R, dtype=float).T + c
+    W[:, 2] += V[:, 2].min() - W[:, 2].min()
+    return W
+
+
+def candidate_directions(V, F, max_faces=10):
+    """Direzioni 'giu' da provare: i sei assi e le normali dei gruppi di facce piane piu estesi."""
+    n, areas = checks.face_normals_areas(V, F)
+    dirs = [np.array(a, dtype=float) for a in ((0, 0, -1), (0, 0, 1), (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0))]
+    key = np.round(n * 20.0).astype(np.int64)            # gruppi di normali entro circa 3 gradi
+    uniq, inv = np.unique(key, axis=0, return_inverse=True)
+    inv = np.asarray(inv).ravel()
+    tot = np.bincount(inv, weights=areas, minlength=len(uniq))
+    for g in np.argsort(-tot)[:max_faces]:
+        if tot[g] < 0.02 * float(areas.sum()):
+            break
+        m = inv == g
+        d = (n[m] * areas[m, None]).sum(axis=0)
+        d = d / max(np.linalg.norm(d), 1e-12)
+        if all(float(np.dot(d, e)) < 0.995 for e in dirs):
+            dirs.append(d)
+    return dirs
+
+
+def orientations(V, F, over=None):
+    """Prova le direzioni candidate e le ordina dalla migliore: meno area a sbalzo, poi nessuna isola,
+    poi piu appoggio, poi pezzo piu basso. Ogni voce ha la matrice R da passare a rotate()."""
+    s = settings(over)
+    lim = float(s["overhang_limit_deg"])
+    bed = [float(b) for b in s["bed"]]
+    out = []
+    for d in candidate_directions(V, F):
+        R = rotation_to_down(d)
+        W = rotate(V, R)
+        W[:, 2] -= W[:, 2].min()
+        ang, areas, on_bed = checks.overhang_angles(W, F)
+        free = ~on_bed & (areas > 1e-9)
+        over_area = float(areas[free & (ang > lim + checks.ANGLE_TOL)].sum())
+        size = W.max(axis=0) - W.min(axis=0)
+        fits = size[2] <= bed[2] + 1e-6 and ((size[0] <= bed[0] + 1e-6 and size[1] <= bed[1] + 1e-6)
+                                             or (size[1] <= bed[0] + 1e-6 and size[0] <= bed[1] + 1e-6))
+        out.append({"down": [round(float(x), 4) for x in d], "R": R, "overhang_area_mm2": over_area,
+                    "contact_mm2": float(areas[on_bed].sum()), "height": float(size[2]), "fits": bool(fits),
+                    "islands": len(checks.local_minima(W, F))})
+    out.sort(key=lambda o: (not o["fits"], round(o["overhang_area_mm2"], 0), o["islands"],
+                            -round(o["contact_mm2"], 0), o["height"]))
+    return out

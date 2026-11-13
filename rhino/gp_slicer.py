@@ -117,9 +117,16 @@ class Job(object):
             m = mesh_from_geometry(o.Geometry)
             if m is not None:
                 joined.Append(m)
-        self.V, self.F = gp_rhino.from_rhino_mesh(joined)
+        self.V0, self.F = gp_rhino.from_rhino_mesh(joined)        # come disegnato
         if len(self.F) == 0:
             raise ValueError("Nessuna geometria stampabile negli oggetti scelti")
+        self.orient(np.eye(3))
+
+    def orient(self, R):
+        """Orienta il pezzo per la stampa (R ruota attorno al centro dell'ingombro disegnato; il pezzo
+        resta appoggiato alla quota di partenza). Il modello di Rhino non cambia finche non si applica."""
+        self.R = np.asarray(R, dtype=float)
+        self.V = printcheck.rotate(self.V0, self.R)
         self.z0 = float(self.V[:, 2].min())
         self.height = float(self.V[:, 2].max()) - self.z0
         self.mesh = gp_rhino.to_rhino_mesh(self.V, self.F)       # stessi indici di faccia di F
@@ -127,8 +134,11 @@ class Job(object):
         self.Vw = self.V - np.array([0.0, 0.0, self.z0])          # appoggiato al piano
         c = (self.V.max(axis=0) + self.V.min(axis=0)) / 2.0
         self.centre = (float(c[0]), float(c[1]))
+        zmax = self.Vw[:, 2][self.F].max(axis=1)                  # facce ordinate per quota massima:
+        self.zorder = np.argsort(zmax, kind="stable")             # il pezzo 'gia stampato' sotto uno strato
+        self.zsorted = zmax[self.zorder]                          # e un prefisso di questo elenco
         self.face_sets = None
-        self.layer_mesh = None
+        self.layer_faces = None
         self.walls = []           # (indice di parete, rg.Polyline)
         self.infill = []          # rg.Line
         self.open_loops = []      # rg.Polyline non chiuse: mesh aperta a quella quota
@@ -161,8 +171,8 @@ class Conduit(Rhino.Display.DisplayConduit):
             col = sd.Color.FromArgb(90, 110, 150) if fits else sd.Color.FromArgb(215, 45, 40)
             e.Display.DrawPolyline(rect.ToPolyline(), col, 2)
             if sl.layer_on:
-                if j.layer_mesh is not None:
-                    e.Display.DrawMeshShaded(j.layer_mesh, sl.mat)
+                if j.layer_faces is not None and j.layer_faces.Length:
+                    e.Display.DrawMeshShaded(j.show, sl.mat, j.layer_faces)
                 for k, pl in j.walls:
                     c = WALL_COLORS[min(k, len(WALL_COLORS) - 1)]
                     e.Display.DrawPolyline(pl, sd.Color.FromArgb(*c), 3 if k == 0 else 2)
@@ -286,13 +296,7 @@ class Slicer(object):
         index = int(max(0, min(n - 1, index)))
         self.layer_index, self.layer_on = index, True
         zw = min((index + 0.5) * h, j.height - 1e-3)
-        below = slicer.faces_below(j.Vw, j.F, index * h)
-        j.layer_mesh = None
-        if len(below):
-            used = np.unique(below)
-            remap = np.full(len(j.V), -1, dtype=np.int64)
-            remap[used] = np.arange(len(used))
-            j.layer_mesh = display_mesh(gp_rhino.to_rhino_mesh(j.V[used], remap[below]))
+        j.layer_faces = int_array(j.zorder[:int(np.searchsorted(j.zsorted, index * h + 1e-9, side="right"))])
         zworld = j.z0 + zw
         plane = rg.Plane(rg.Point3d(0, 0, zworld), rg.Vector3d.ZAxis)
         polys = rg.Intersect.Intersection.MeshPlane(j.mesh, plane) or []
@@ -378,6 +382,69 @@ class Slicer(object):
                         else:
                             inner[i] = (k, [poly_xy(pl)])
         return walls, [p for _, ps in inner.values() for p in ps]
+
+    # ----------------------------------------------------------- orientamento
+    def _reoriented(self, R, note):
+        self.job.orient(R)
+        self.extra = [l for l in self.extra if not l.startswith("Orientamento")] + [note]
+        self.layer_index = 0
+        return self.analyse()
+
+    def rotate_by(self, axis, degrees=90.0):
+        """Ruota il pezzo di 'degrees' attorno all'asse 'x', 'y' o 'z' del mondo (solo per la stampa)."""
+        if self.job is None:
+            return None
+        a = math.radians(degrees)
+        c, s = math.cos(a), math.sin(a)
+        Ra = {"x": [[1, 0, 0], [0, c, -s], [0, s, c]], "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]],
+              "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[axis]
+        return self._reoriented(np.array(Ra, dtype=float) @ self.job.R,
+                                "Orientamento: ruotato di %g gradi attorno a %s (il modello non e cambiato)."
+                                % (degrees, axis.upper()))
+
+    def best_orientation(self):
+        """Prova gli orientamenti candidati e mette il pezzo in quello con meno sbalzi."""
+        j = self.job
+        if j is None:
+            return None
+        before = self.result["overhang_area_mm2"] if self.result else float("nan")
+        ranked = printcheck.orientations(j.V0, j.F, self.settings)
+        self.ranked = ranked
+        b = ranked[0]
+        self._reoriented(b["R"], "Orientamento migliore tra %d provati: sbalzo %.0f mm2 (prima %.0f), appoggio "
+                         "%.0f mm2, altezza %.1f mm. Il modello non e cambiato: 'Applica al modello' per ruotarlo."
+                         % (len(ranked), b["overhang_area_mm2"], before, b["contact_mm2"], b["height"]))
+        return b
+
+    def reset_orientation(self):
+        if self.job is not None:
+            self._reoriented(np.eye(3), "Orientamento: come disegnato.")
+
+    def apply_orientation(self):
+        """Ruota davvero gli oggetti di Rhino come nell'anteprima (un solo passo di Annulla)."""
+        j = self.job
+        if j is None or np.allclose(j.R, np.eye(3)):
+            return False
+        c = (j.V0.max(axis=0) + j.V0.min(axis=0)) / 2.0
+        shift = c - j.R @ c
+        shift[2] += float(j.V0[:, 2].min()) - float(((j.V0 - c) @ j.R.T + c)[:, 2].min())
+        xf = rg.Transform(1.0)
+        for r in range(3):
+            for k in range(3):
+                xf[r, k] = float(j.R[r, k])
+            xf[r, 3] = float(shift[r])
+        doc, ids = j.doc, list(j.obj_ids)
+        sn = doc.BeginUndoRecord("Generative Print: orientamento di stampa")
+        for oid in ids:
+            doc.Objects.Transform(oid, xf, True)
+        doc.EndUndoRecord(sn)
+        st = Rhino.DocObjects.ObjectEnumeratorSettings()
+        st.HiddenObjects = True
+        objs = [o for o in doc.Objects.GetObjectList(st) if o.Id in ids]
+        self.open(doc, objs)
+        self.extra = ["Orientamento applicato al modello (Annulla in Rhino per tornare indietro)."]
+        self.refresh()
+        return True
 
     def thickness(self):
         j = self.job
@@ -623,6 +690,13 @@ class Slicer(object):
         btn.AddRow(button("Verifica spessori", self.thickness), button("Affetta con Bambu Studio", self.bambu_start),
                    button("Esporta STL", self.on_export), button("Modifica plastica", self.on_sculpt))
         lay.AddRow(btn)
+        rot = ef.DynamicLayout()
+        rot.Spacing = ed.Size(6, 6)
+        rot.AddRow(label("Orientamento"), button("Ruota X 90", lambda: self.rotate_by("x")),
+                   button("Ruota Y 90", lambda: self.rotate_by("y")),
+                   button("Migliore", self.best_orientation), button("Come disegnato", self.reset_orientation),
+                   button("Applica al modello", self.apply_orientation))
+        lay.AddRow(rot)
         lay.AddRow(self.w_report)
         lay.AddRow(label("Pareti e riempimento sono un'anteprima; peso e tempo precisi: Affetta con Bambu Studio."))
         form.Content = lay
