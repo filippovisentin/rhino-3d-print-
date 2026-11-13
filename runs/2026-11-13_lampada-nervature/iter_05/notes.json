@@ -1,0 +1,27 @@
+{
+  "title": "Sbalzo rientrato senza perdere lo slancio",
+  "changes": [
+    {
+      "param": "ribs.fade_bottom",
+      "from": 0.08,
+      "to": 0.22,
+      "why": "le nervature crescono dopo la fascia in cui la parete si allarga di più"
+    },
+    {
+      "param": "profile.radii[0]",
+      "from": 52,
+      "to": 54,
+      "why": "circa 1,5° in meno di inclinazione alla base"
+    }
+  ],
+  "reasoning": "Previsione: circa 43°. Misurato: 43,2°, nessuna faccia oltre soglia. Peso 223,6 g, spessore 1,28 mm, diametro 181,7 mm. Prima iterazione che rispetta tutti i vincoli.",
+  "critique": {
+    "proportions": 8,
+    "rhythm": 8,
+    "brief_fit": 8.5,
+    "silhouette": 8,
+    "score": 8.1,
+    "text": "La correzione ha anche un effetto estetico utile: il piede liscio da cui nascono le nervature fa da basamento e rende la torsione più leggibile per contrasto. La forma è risolta, ma è ancora del tutto regolare: sedici nervature identiche."
+  },
+  "decision": "Vincoli e soglia estetica sono raggiunti con la sola via parametrica. Passo alla modellazione plastica nell'editor per introdurre una gerarchia che i parametri non danno: quattro costole maggiori, tirate a mano lungo le creste con simmetria radiale 4."
+}

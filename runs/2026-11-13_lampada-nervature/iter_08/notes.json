@@ -1,0 +1,21 @@
+{
+  "title": "Terminazioni lisciate: oggetto finale",
+  "changes": [
+    {
+      "param": "pennello Liscia",
+      "from": "—",
+      "to": "raggio 16 mm, forza 70%, simmetria 4, quattro passate",
+      "why": "raccordare la fine delle costole al bordo"
+    }
+  ],
+  "reasoning": "Già dopo la prima passata la mappa non mostra più facce oltre soglia. Verifica indipendente sull'STL: sbalzo massimo 44,5°, nessuna faccia oltre soglia; peso 226,0 g; spessore 1,27 mm; diametro 181,7 mm; foro E27 40,5 mm; distanza lampadina-parete 27,9 mm. Tutti i vincoli rispettati. Il margine sullo sbalzo è stretto (0,5°): è un dato da tenere presente in stampa.",
+  "critique": {
+    "proportions": 8.5,
+    "rhythm": 8.5,
+    "brief_fit": 8.5,
+    "silhouette": 8.5,
+    "score": 8.5,
+    "text": "La lisciatura ha lasciato sul bordo quattro lievi onde in corrispondenza delle costole maggiori: un dettaglio non previsto, che dà al bordo un carattere fatto a mano e lega la gerarchia delle nervature alla sagoma. Forma coerente con il brief: torsione leggibile, piede liscio, spalla tesa."
+  },
+  "decision": "Vincoli soddisfatti e voto estetico 8,5 sopra la soglia di 7,5: mi fermo all'iterazione 8, che è anche il massimo previsto dal brief. Questo è l'oggetto finale."
+}

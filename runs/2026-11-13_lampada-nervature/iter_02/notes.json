@@ -1,0 +1,33 @@
+{
+  "title": "Meno nervature, diametro corretto",
+  "changes": [
+    {
+      "param": "profile.radii",
+      "from": "[60, 85, 90, 70, 40]",
+      "to": "[57, 80, 85, 68, 42]",
+      "why": "le creste devono stare dentro Ø 180 mm"
+    },
+    {
+      "param": "ribs.count",
+      "from": 24,
+      "to": 16,
+      "why": "raggio di curvatura sul collo maggiore della parete; meno superficie"
+    },
+    {
+      "param": "ribs.amplitude",
+      "from": 0.06,
+      "to": 0.05,
+      "why": "fianchi delle nervature meno ripidi, meno peso"
+    }
+  ],
+  "reasoning": "Previsione fatta prima di generare: 259 g. Misurato: 265,3 g. Sbalzo (39,1°), spessore (1,53 mm al primo percentile, nessuna piega) e diametro (180,0 mm) ora rispettano i limiti.",
+  "critique": {
+    "proportions": 6.5,
+    "rhythm": 7.5,
+    "brief_fit": 7.5,
+    "silhouette": 6.5,
+    "score": 7.0,
+    "text": "Le 16 nervature sono più generose e la luce radente le disegna meglio. Restano due difetti: il bordo superiore ondulato a piena ampiezza è nervoso e delicato, e il ventre a metà altezza rende l'oggetto più simile a un vaso che a una lampada."
+  },
+  "decision": "Resta fuori solo il peso (265 g contro 250). Porto la parete a 1,35 mm, cioè tre passate da 0,45 mm: peso previsto 224 g e più luce attraverso il PLA. Colgo l'occasione per due correzioni estetiche: sfumo le nervature verso il bordo superiore, che diventa un cerchio pulito, e abbasso il ventre per dare alla sagoma una spalla più tesa."
+}

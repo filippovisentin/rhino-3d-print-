@@ -1,0 +1,193 @@
+{
+  "topology": {
+    "naked_edges": 0,
+    "duplicated_edges": 0,
+    "degenerate_faces": 0,
+    "bodies": 1,
+    "watertight": true
+  },
+  "overhang": {
+    "max_deg": 43.2342735408399,
+    "area_over_mm2": 0.0,
+    "faces_over": 0,
+    "bed_contact_mm2": 7871.229878599999,
+    "limit_deg": 45.0
+  },
+  "islands": 0,
+  "bbox": {
+    "min": [
+      -90.2113,
+      -90.2113,
+      0.0
+    ],
+    "max": [
+      90.2113,
+      90.2113,
+      220.0
+    ],
+    "size": [
+      180.4226,
+      180.4226,
+      220.0
+    ]
+  },
+  "stability": {
+    "margin_mm": 53.992734510944,
+    "centroid": [
+      2.2826771893220446e-15,
+      -1.5671300646646374e-14,
+      90.31237667330456
+    ],
+    "footprint_points": 1920
+  },
+  "material": {
+    "volume_cm3": 180.3408915266879,
+    "surface_cm2": 2522.98833632326,
+    "mass_solid_g": 223.62270549309298,
+    "mass_est_g": 223.62270549309298,
+    "filament_m": 74.97703008149337,
+    "time_h_rough": 8.349115348457772
+  },
+  "thickness": {
+    "min": 1.2682458158609844,
+    "p1": 1.2760711289381719,
+    "p5": 1.2876344617422257,
+    "median": 1.3394017941044687,
+    "samples": 3000
+  },
+  "fixture": {
+    "hole_diameter": 40.49513814741277,
+    "bulb_clearance": 27.89055800465021,
+    "top_opening": 85.47893812019032,
+    "bulb_top_z": 170.0,
+    "height": 220.0
+  },
+  "diameter": 181.67425448037486,
+  "checks": [
+    {
+      "id": "closed",
+      "label": "Mesh chiusa",
+      "value": 0,
+      "unit": "spigoli aperti",
+      "limit": "0",
+      "pass": true,
+      "note": "1 corpo/i, 0 facce degeneri"
+    },
+    {
+      "id": "overhang",
+      "label": "Sbalzo massimo",
+      "value": 43.2,
+      "unit": "gradi",
+      "limit": "<= 45",
+      "pass": true,
+      "note": "0 mm2 oltre soglia (0 facce)"
+    },
+    {
+      "id": "islands",
+      "label": "Isole (partenze nel vuoto)",
+      "value": 0,
+      "unit": "punti",
+      "limit": "0",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "bed",
+      "label": "Ingombro",
+      "value": [
+        180.4,
+        180.4,
+        220.0
+      ],
+      "unit": "mm",
+      "limit": "<= 256 x 256 x 256",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "adhesion",
+      "label": "Appoggio sul piano",
+      "value": 7871.0,
+      "unit": "mm2",
+      "limit": ">= 100",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "stability",
+      "label": "Stabilita (baricentro dentro l'appoggio)",
+      "value": 54.0,
+      "unit": "mm",
+      "limit": "> 0",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "mass",
+      "label": "Peso stimato",
+      "value": 223.6,
+      "unit": "g",
+      "limit": "<= 250",
+      "pass": true,
+      "note": "pieno al 100%: 223.6 g"
+    },
+    {
+      "id": "wall",
+      "label": "Spessore minimo (1 percentile)",
+      "value": 1.28,
+      "unit": "mm",
+      "limit": ">= 1.2",
+      "pass": true,
+      "note": "minimo assoluto 1.27 mm (deve essere >= 0.60), 3000 campioni"
+    },
+    {
+      "id": "socket",
+      "label": "Foro portalampada E27",
+      "value": 40.5,
+      "unit": "mm",
+      "limit": "40 - 41",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "clearance",
+      "label": "Distanza lampadina-parete",
+      "value": 27.9,
+      "unit": "mm",
+      "limit": ">= 20",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "vent",
+      "label": "Apertura superiore",
+      "value": 85.5,
+      "unit": "mm",
+      "limit": ">= 50",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "bulb_fit",
+      "label": "Lampadina dentro il diffusore",
+      "value": 50.0,
+      "unit": "mm",
+      "limit": ">= 0",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "diameter",
+      "label": "Diametro massimo",
+      "value": 181.7,
+      "unit": "mm",
+      "limit": "180 +/- 3",
+      "pass": true,
+      "note": ""
+    }
+  ],
+  "pass": true,
+  "layers": 1100,
+  "file": "model.stl",
+  "triangles": 113280
+}

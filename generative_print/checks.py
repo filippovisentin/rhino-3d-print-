@@ -344,7 +344,10 @@ def run_checks(V, F, params, raycast=None, samples=3000):
                                  round(fx["height"] - fx["bulb_top_z"], 1), "mm", ">= 0",
                                  fx["height"] >= fx["bulb_top_z"]))
         if "target_diameter" in cons:
-            dia = float(max(size[0], size[1]))
+            # diametro del cerchio circoscritto attorno all'asse: vale anche per forme non simmetriche
+            cx, cy = (bb_min[0] + bb_max[0]) / 2.0, (bb_min[1] + bb_max[1]) / 2.0
+            dia = float(2.0 * np.hypot(V[:, 0] - cx, V[:, 1] - cy).max())
+            result["diameter"] = dia
             tol = float(cons.get("diameter_tolerance", 3.0))
             checks.append(_check("diameter", "Diametro massimo", round(dia, 1), "mm",
                                  "%g +/- %g" % (cons["target_diameter"], tol),

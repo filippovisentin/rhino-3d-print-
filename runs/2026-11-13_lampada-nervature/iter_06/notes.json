@@ -1,0 +1,21 @@
+{
+  "title": "Modellazione plastica: quattro costole maggiori",
+  "changes": [
+    {
+      "param": "pennello Tira",
+      "from": "—",
+      "to": "raggio 12 mm, 1,1 mm per colpo, simmetria 4",
+      "why": "gerarchia tra le nervature: quattro creste più alte, da z = 70 a z = 200 mm"
+    }
+  ],
+  "reasoning": "Passaggio dall'approccio parametrico all'editor plastico: la pelle dell'iterazione 5 viene scolpita con il pennello Tira lungo quattro creste. Un primo tentativo a 0,5 mm per colpo era quasi invisibile ed è stato annullato. La verifica sul solido ricostruito dice: sbalzo 44,5°, peso 228,1 g, spessore 1,26 mm, ma diametro circoscritto 187,0 mm. Le costole maggiori attraversano il ventre, che era già al limite.",
+  "critique": {
+    "proportions": 8,
+    "rhythm": 8.5,
+    "brief_fit": 8.5,
+    "silhouette": 7.5,
+    "score": 8.1,
+    "text": "La gerarchia funziona: l'occhio trova quattro linee guida dentro il ritmo delle sedici. Al ventre però le costole maggiori gonfiano la sagoma e la rendono meno tesa, oltre a sforare il diametro."
+  },
+  "decision": "La mappa e la verifica indicano lo stesso punto: il ventre. Annullo la pennellata e la rifaccio facendo partire le costole sopra il ventre, da z = 120 mm, dove il raggio è già in calo e c'è margine."
+}

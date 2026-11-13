@@ -1,0 +1,14 @@
+{
+  "title": "Prima traduzione del brief",
+  "changes": [],
+  "reasoning": "Traduzione diretta del brief senza ottimizzare: profilo a goccia alto 220 mm, raggio massimo 90 mm (Ø 180 mm sulla linea media), 24 nervature con ampiezza 6% e torsione di 90°, parete 1,6 mm, fondo 3 mm con foro da 40,5 mm per la ghiera E27.",
+  "critique": {
+    "proportions": 6,
+    "rhythm": 5,
+    "brief_fit": 7,
+    "silhouette": 6,
+    "score": 6.0,
+    "text": "La torsione si legge bene e il tema del brief c'è. Le 24 nervature però sono fitte: sul collo si stringono fino a diventare una zigrinatura e il bordo superiore è una corona dentellata fragile. La sagoma è un uovo un po' anonimo."
+  },
+  "decision": "Quattro vincoli falliti. Le nervature aggiungono circa il 40% di superficie (quindi di peso) e sul collo hanno un raggio di curvatura di circa 1,2 mm, minore della parete da 1,6 mm: l'offset interno si ripiega (spessore minimo misurato 0,00 mm). Il diametro reale è 192,8 mm perché le creste sporgono dalla linea media. Riduco il profilo perché le creste arrivino a Ø 180 mm, e passo a 16 nervature con ampiezza 5%: meno superficie, niente pieghe, ritmo più leggibile. Peso previsto circa 259 g."
+}

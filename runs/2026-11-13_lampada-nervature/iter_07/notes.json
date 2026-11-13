@@ -1,0 +1,21 @@
+{
+  "title": "Costole maggiori solo sulla spalla",
+  "changes": [
+    {
+      "param": "pennello Tira",
+      "from": "z = 70-200 mm",
+      "to": "z = 120-205 mm",
+      "why": "le costole non devono attraversare il ventre"
+    }
+  ],
+  "reasoning": "Diametro rientrato a 181,7 mm, peso 226,6 g. Nasce però un nuovo difetto: sbalzo 47,4° su 10 mm² (8 facce), tutte a z = 206-208 mm. È la terminazione alta delle costole: finiscono di colpo a 15 mm dal bordo, e sulla faccia interna della parete il raccordo supera la soglia. L'editor lo mostra in rosso (13,5 mm² sulla pelle).",
+  "critique": {
+    "proportions": 8,
+    "rhythm": 8.5,
+    "brief_fit": 8.5,
+    "silhouette": 8.5,
+    "score": 8.4,
+    "text": "Meglio: le costole maggiori nascono dal ventre e salgono verso il bordo, accompagnando la spalla. La terminazione in alto è però brusca, e si vede anche a occhio."
+  },
+  "decision": "Difetto piccolo e locale: è il caso d'uso del pennello Liscia. Lo passo sulle quattro terminazioni tra z = 200 e z = 213 mm con simmetria radiale 4, controllando la mappa degli sbalzi a ogni passata."
+}

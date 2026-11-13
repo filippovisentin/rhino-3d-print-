@@ -49,7 +49,7 @@
     "time_h_rough": 12.509590839191404
   },
   "thickness": {
-    "min": 0.0031731885769624634,
+    "min": 0.003168930775658929,
     "p1": 1.3242760139474532,
     "p5": 1.3939006441931778,
     "median": 1.5763063419025327,
@@ -62,6 +62,7 @@
     "bulb_top_z": 170.0,
     "height": 220.0
   },
+  "diameter": 192.79799413500132,
   "checks": [
     {
       "id": "closed",
@@ -136,8 +137,8 @@
       "value": 1.32,
       "unit": "mm",
       "limit": ">= 1.2",
-      "pass": true,
-      "note": "minimo assoluto 0.00 mm su 3000 campioni"
+      "pass": false,
+      "note": "minimo assoluto 0.00 mm (deve essere >= 0.60), 3000 campioni"
     },
     {
       "id": "socket",
@@ -178,7 +179,7 @@
     {
       "id": "diameter",
       "label": "Diametro massimo",
-      "value": 192.2,
+      "value": 192.8,
       "unit": "mm",
       "limit": "180 +/- 3",
       "pass": false,

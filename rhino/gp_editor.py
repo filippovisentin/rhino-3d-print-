@@ -74,6 +74,7 @@ class Session(object):
         self.last_dab = None
         self.grab = None
         self.report = ""
+        self.log = []                # pennellate applicate, per il diario
         self.dirty = False
         self.limit = float(self.params["print"]["overhang_limit_deg"])
         self.material = Rhino.Display.DisplayMaterial(sd.Color.FromArgb(*CLAY))
@@ -171,6 +172,10 @@ class Session(object):
         """Pennellata lungo una lista di punti 3D (usata dal mouse e dagli script)."""
         if record:
             self.begin()
+        self.log.append({"brush": brush or self.brush, "radius": self.radius, "invert": bool(invert),
+                         "amount": self.dab_amount(brush or self.brush, invert) if amount is None else amount,
+                         "symmetry": self.symmetry,
+                         "points": [[round(float(c), 2) for c in p] for p in points]})
         last = None
         step = max(self.radius * 0.25, 0.5)
         for p in points:

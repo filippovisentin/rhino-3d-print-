@@ -1,0 +1,11 @@
+{
+  "title": "Più slancio: base stretta e torsione maggiore",
+  "changes": [
+    {"param": "profile.radii", "from": "[60, 86, 82, 64, 44]", "to": "[52, 84.5, 81.5, 64, 44]", "why": "base più stretta per staccare la forma dal tavolo; diametro riportato a 180 mm"},
+    {"param": "ribs.twist_deg", "from": 90, "to": 110, "why": "torsione più decisa, è il tema del brief"}
+  ],
+  "reasoning": "Mossa estetica consapevole del rischio. Esito: sbalzo massimo 46,8°, 278 mm² oltre soglia. Le facce fuori soglia stanno tutte tra z = 10 e z = 17 mm, a raggio 60-66 mm: è la fascia dove la parete si allarga di più e, nello stesso punto, le nervature stanno nascendo (sfumatura di 17,6 mm). Il profilo da solo arriva a 41°; le nervature aggiungono 3-5°.",
+  "critique": {"proportions": 7.5, "rhythm": 8, "brief_fit": 8.5, "silhouette": 7.5, "score": 7.9,
+    "text": "Molto meglio: la base stretta alleggerisce la sagoma e la torsione a 110° dà alle nervature un andamento continuo, quasi tessile. Il voto supera la soglia, ma l'oggetto non è stampabile senza supporti."},
+  "decision": "Non rinuncio allo slancio: intervengo solo dove nasce il problema. Allungo la sfumatura inferiore delle nervature da 8% a 22% dell'altezza, così crescono dopo la fascia in cui la parete si allarga, e allargo la base di 2 mm di raggio (da 52 a 54) per togliere circa 1,5° al profilo. Previsione: sbalzo massimo intorno a 43°."
+}

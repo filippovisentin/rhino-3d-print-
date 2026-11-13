@@ -197,3 +197,52 @@ def skin_from_doc(doc):
             V, _ = from_rhino_mesh(obj.Geometry)
             return obj, V.reshape(meta["rings"], meta["segments"], 3), meta["params"]
     return None, None, None
+
+
+# ------------------------------------------------------------------ passo del ciclo guidato dall'agente
+def deep_merge(base, over):
+    out = dict(base)
+    for k, v in (over or {}).items():
+        out[k] = deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def external_verify(iter_dir):
+    """Lancia la verifica indipendente (Python esterno a Rhino) sull'STL esportato."""
+    import subprocess
+    exe = os.path.join(REPO, ".venv", "Scripts", "python.exe")
+    if not os.path.exists(exe):
+        exe = os.path.join(REPO, ".venv", "bin", "python")
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
+    proc = subprocess.run([exe, "-m", "generative_print.verify", iter_dir], cwd=REPO, env=env,
+                          capture_output=True, text=True, creationflags=0x08000000 if os.name == "nt" else 0)
+    return proc.stdout + proc.stderr
+
+
+def step(doc, run_dir, n, overrides=None):
+    """Iterazione n: parametri = iterazione precedente + modifiche; genera, cattura, verifica."""
+    iter_dir = os.path.join(run_dir, "iter_%02d" % n)
+    os.makedirs(iter_dir, exist_ok=True)
+    ppath = os.path.join(iter_dir, "params.json")
+    if overrides is not None or not os.path.exists(ppath):
+        with open(os.path.join(run_dir, "iter_%02d" % (n - 1), "params.json"), encoding="utf-8") as fh:
+            params = deep_merge(json.load(fh), overrides)
+        with open(ppath, "w", encoding="utf-8") as fh:
+            json.dump(params, fh, indent=2)
+    run_iteration(doc, iter_dir)
+    return external_verify(iter_dir)
+
+
+def sculpt_step(doc, run_dir, n, session, note=""):
+    """Registra come iterazione n la forma scolpita nell'editor (sessione su una pelle)."""
+    iter_dir = os.path.join(run_dir, "iter_%02d" % n)
+    os.makedirs(os.path.join(iter_dir, "views"), exist_ok=True)
+    params = dict(session.params)
+    params["sculpt"] = {"note": note, "strokes": session.log}
+    with open(os.path.join(iter_dir, "params.json"), "w", encoding="utf-8") as fh:
+        json.dump(params, fh, indent=2)
+    skin = session.V.reshape(session.grid[0], session.grid[1], 3).copy()
+    np.save(os.path.join(iter_dir, "skin.npy"), skin)
+    V, F = generators.shell_from_params(skin, params)
+    _capture(doc.Views.ActiveView, os.path.join(iter_dir, "views", "editor.png"))   # mappa degli sbalzi
+    return iter_dir, params, skin, V, F

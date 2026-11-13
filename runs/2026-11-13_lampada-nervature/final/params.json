@@ -1,0 +1,71 @@
+{
+  "object": "lamp_shade",
+  "units": "mm",
+  "envelope": {
+    "height": 220.0
+  },
+  "profile": {
+    "radii": [
+      54.0,
+      84.5,
+      81.5,
+      64.0,
+      44.0
+    ]
+  },
+  "ribs": {
+    "count": 16,
+    "amplitude": 0.05,
+    "twist_deg": 110.0,
+    "shape": "sine",
+    "fade_bottom": 0.22,
+    "fade_top": 0.1
+  },
+  "wall": {
+    "thickness": 1.35
+  },
+  "floor": {
+    "thickness": 3.0
+  },
+  "fixture": {
+    "hole_diameter": 40.5
+  },
+  "mesh": {
+    "segments": 0,
+    "rings": 0,
+    "edge": 1.6
+  },
+  "print": {
+    "material": "PLA",
+    "density_g_cm3": 1.24,
+    "nozzle": 0.4,
+    "layer": 0.2,
+    "line_width": 0.45,
+    "walls": 2,
+    "infill": 0.15,
+    "bed": [
+      256.0,
+      256.0,
+      256.0
+    ],
+    "overhang_limit_deg": 45.0,
+    "flow_mm3_s": 6.0,
+    "filament_diameter": 1.75
+  },
+  "constraints": {
+    "max_mass_g": 250.0,
+    "min_wall": 1.2,
+    "target_diameter": 180.0,
+    "diameter_tolerance": 3.0,
+    "fixture": {
+      "socket": "E27",
+      "hole_diameter": 40.0,
+      "hole_tolerance": 1.0,
+      "socket_height": 60.0,
+      "bulb_diameter": 60.0,
+      "bulb_length": 110.0,
+      "min_clearance": 20.0,
+      "min_top_opening": 50.0
+    }
+  }
+}

@@ -1,0 +1,10 @@
+<section class="card"><div class="head"><span class="num">METODO E LIMITI</span><h2>Cosa è stato misurato e cosa no</h2></div>
+<ul>
+<li><b>Geometria e viste</b>: generate in Rhino 8 con Python 3, pilotato dall'agente tramite il server MCP di Rhino. Le quattro viste hanno inquadratura fissa, quindi le iterazioni sono confrontabili.</li>
+<li><b>Misure</b>: calcolate fuori da Rhino sul file STL esportato (<code>python -m generative_print.verify</code>). Sbalzo: angolo di ogni faccia rivolta verso il basso rispetto alla verticale, escluse le facce appoggiate al piano. Spessore: 3000 raggi lanciati dalla superficie verso l'interno del materiale, più 300 mirati sulle facce più piccole. Peso: volume della mesh per 1,24 g/cm³ (PLA, valore ipotizzato: va tarato sul filamento reale). Portalampada: raggi radiali dall'asse.</li>
+<li><b>Misura del diametro cambiata durante la corsa</b>: all'inizio era l'ingombro lungo X e Y; dall'iterazione 6 è il cerchio circoscritto attorno all'asse, più severo e corretto anche per forme non simmetriche. Tutte le iterazioni sono state rimisurate con la regola nuova: per questo l'iterazione 3 risulta fuori tolleranza di 0,6 mm.</li>
+<li><b>Critica estetica</b>: giudizio del modello (Claude) sulle viste, con una rubrica fissa di quattro voci. È un parere, non una misura.</li>
+<li><b>Pennellate</b>: nelle iterazioni 6-8 sono state applicate dall'agente tramite script, con lo stesso motore dei pennelli usato dal mouse. I pennelli col mouse vero sono stati provati a parte su una forma libera.</li>
+<li><b>Non verificato</b>: l'oggetto non è stato stampato né aperto in uno slicer. Tempo di stampa e metri di filo sono stime grossolane. Il margine sullo sbalzo dell'oggetto finale è di 0,5°. La verifica termica non è stata fatta: usare solo lampadine LED.</li>
+<li><b>Portalampada</b>: foro da 40,5 mm per ghiera E27 (foro standard 40 mm, fondo spesso 3 mm). Quote controllate su due cataloghi di ricambi per lampade, non su una norma.</li>
+</ul></section>

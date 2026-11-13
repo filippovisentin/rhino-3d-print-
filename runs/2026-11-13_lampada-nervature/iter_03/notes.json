@@ -1,0 +1,33 @@
+{
+  "title": "Parete a tre passate, bordo pulito, ventre più basso",
+  "changes": [
+    {
+      "param": "wall.thickness",
+      "from": 1.6,
+      "to": 1.35,
+      "why": "peso sotto i 250 g; tre passate da 0,45 mm; più luce attraverso la parete"
+    },
+    {
+      "param": "ribs.fade_top",
+      "from": 0.0,
+      "to": 0.1,
+      "why": "bordo superiore circolare, meno fragile"
+    },
+    {
+      "param": "profile.radii",
+      "from": "[57, 80, 85, 68, 42]",
+      "to": "[60, 86, 82, 64, 44]",
+      "why": "ventre più basso, spalla più tesa"
+    }
+  ],
+  "reasoning": "Previsione: 224 g con la sola parete più sottile. Misurato: 233,6 g, perché il nuovo profilo ha più superficie. Peso, sbalzo (42,6°) e spessore (1,29 mm) sono a posto, ma il ventre più largo porta il diametro a 183,6 mm: 0,6 mm oltre la tolleranza.",
+  "critique": {
+    "proportions": 6.5,
+    "rhythm": 7.5,
+    "brief_fit": 8,
+    "silhouette": 7,
+    "score": 7.2,
+    "text": "Il bordo pulito e il ventre basso funzionano: la forma ora è una campana, non più un uovo. È però tozza: la base larga 120 mm la tiene incollata al tavolo, e la torsione di 90° è timida per un oggetto che ha la torsione come tema."
+  },
+  "decision": "Resta fuori il diametro, di poco, e il voto estetico (7,2) è sotto la soglia di 7,5 fissata nel brief. Riduco il ventre per rientrare a 180 mm, stringo la base da Ø 120 a Ø 104 mm per dare slancio e porto la torsione a 110°. So che le ultime due mosse aumentano l'inclinazione della parete in basso: il margine sullo sbalzo è di soli 2,4°, quindi mi aspetto di doverlo verificare con attenzione."
+}
