@@ -75,6 +75,9 @@ class Session(object):
         self.grab = None
         self.report = ""
         self.log = []                # pennellate applicate, per il diario
+        self.respect = False         # a fine pennellata riporta la zona scolpita sotto il limite
+        self.collect = []            # vertici mossi dalla pennellata in corso
+        self.respect_note = ""
         self.dirty = False
         self.limit = float(self.params["print"]["overhang_limit_deg"])
         self.material = Rhino.Display.DisplayMaterial(sd.Color.FromArgb(*CLAY))
@@ -121,6 +124,31 @@ class Session(object):
             self.classify()
         self.solid = None
         self.dirty = True
+        if idx is not None:
+            self.collect.append(np.asarray(idx))
+
+    def enforce_limit(self):
+        """Se l'opzione e attiva, riporta sotto il limite di sbalzo la zona toccata dall'ultima
+        pennellata (sculpt.relax_overhang_mesh). Restituisce il risultato o None."""
+        touched, self.collect = self.collect, []
+        self.respect_note = ""
+        if not self.respect or not touched:
+            return None
+        region = np.unique(np.concatenate(touched))
+        skin = self.kind == "skin"
+        fixed = None
+        if skin:
+            fixed = np.zeros(len(self.V), dtype=bool)
+            fixed[self.base_ring] = True
+        res = sculpt.relax_overhang_mesh(self.V, self.F, self.edges, self.limit, region=region,
+                                         two_sided=skin, horizontal=skin, fixed=fixed)
+        if len(res["moved"]):
+            sculpt.constrain(self.V, self.base_ring)
+            self.push(res["moved"])
+            self.collect = []
+        self.respect_note = ("limite rispettato (%d punti corretti)" % len(res["moved"]) if res["ok"]
+                             else "limite NON raggiunto nella zona: %.0f gradi" % res["max_deg"])
+        return res
 
     # ---------------------------------------------------------------- selezione col mouse
     def ray(self, view, point):
@@ -139,6 +167,7 @@ class Session(object):
 
     # ---------------------------------------------------------------- pennelli
     def begin(self):
+        self.collect = []
         self.undo_stack.append(self.V.copy())
         if len(self.undo_stack) > 30:
             self.undo_stack.pop(0)
@@ -189,6 +218,8 @@ class Session(object):
                 self.apply_dab(last + (p - last) * (k / float(n)), brush, invert, amount)
             if n:
                 last = p
+        if record:
+            self.enforce_limit()
 
     def grab_begin(self, view, point, hit):
         cam = view.ActiveViewport.CameraDirection
@@ -381,7 +412,9 @@ class Mouse(Rhino.UI.MouseCallback):
                 s.stroking = False
                 s.grab = None
                 e.Cancel = True
+                s.enforce_limit()
                 self.ed.refresh_status()
+                e.View.Redraw()
         except Exception:
             self.ed.fail()
 
@@ -485,6 +518,10 @@ class Editor(object):
         self.w_heat = ef.CheckBox()
         self.w_heat.Text = "Mappa degli sbalzi (rosso = oltre soglia)"
         self.w_heat.Checked = True
+        self.w_respect = ef.CheckBox()
+        self.w_respect.Text = "Rispetta il limite di sbalzo mentre scolpisco (corregge la zona a fine pennellata)"
+        self.w_respect.Checked = bool(self.session.respect) if self.session is not None else False
+        self.w_respect.CheckedChanged += lambda s, e: self.guard(self.on_settings)
         self.w_layers = ef.CheckBox()
         self.w_layers.Text = "Anteprima a strati"
         self.w_layer = ef.Slider()
@@ -527,6 +564,7 @@ class Editor(object):
         lay.AddRow(self.w_strength_l, self.w_strength)
         lay.AddRow(label("Simmetria radiale (copie)"), self.w_sym)
         lay.AddRow(self.w_heat)
+        lay.AddRow(self.w_respect)
         lay.AddRow(self.w_layers, self.w_layer)
         lay.AddRow(self.w_layer_info)
         row = ef.DynamicLayout()
@@ -565,8 +603,9 @@ class Editor(object):
         s = self.session
         s.classify()
         kind = "pelle di lampada/vaso" if s.kind == "skin" else "solido chiuso"
-        self.w_status.Text = ("%s, %d vertici | sbalzo max %.0f gradi | oltre soglia: %.0f mm2"
-                              % (kind, len(s.V), s.max_angle, s.over_area))
+        self.w_status.Text = ("%s, %d vertici | sbalzo max %.0f gradi | oltre soglia: %.0f mm2%s"
+                              % (kind, len(s.V), s.max_angle, s.over_area,
+                                 (" | " + s.respect_note) if s.respect_note else ""))
 
     def on_settings(self):
         s = self.session
@@ -576,6 +615,7 @@ class Editor(object):
         s.radius = float(self.w_radius.Value)
         s.strength = self.w_strength.Value / 100.0
         s.symmetry = int(self.w_sym.Value)
+        s.respect = bool(self.w_respect.Checked)
         self.w_radius_l.Text = "Raggio %d mm" % self.w_radius.Value
         self.w_strength_l.Text = "Forza %d %%" % self.w_strength.Value
 

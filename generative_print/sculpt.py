@@ -142,3 +142,58 @@ def relax_overhang(skin, solid_fn, limit_deg, target_margin=0.3, strength=0.5, g
         new[mask, :2] += strength * (avg[mask, :2] - skin[mask, :2])
         skin = new
     return skin, log
+
+
+def relax_overhang_mesh(V, F, edges, limit_deg, region=None, two_sided=False, horizontal=False,
+                        fixed=None, target_margin=0.3, strength=0.5, grow=1, max_iter=40):
+    """Riporta sotto il limite di sbalzo una mesh qualsiasi, in-place, lisciando solo dove serve.
+
+    region: indici dei vertici appena scolpiti; si correggono solo le facce che li toccano (gli
+    sbalzi che c'erano gia altrove non vengono toccati). two_sided: parete sottile, conta
+    l'inclinazione in entrambi i versi (pelle di lampade e vasi). horizontal: sposta solo in x e y.
+    fixed: maschera dei vertici che non si muovono (di base quelli appoggiati al piano).
+    Restituisce {"moved": indici mossi, "passes", "max_deg", "ok"} riferiti alla zona corretta.
+    """
+    from .checks import BED_TOL, face_normals_areas
+    target = float(limit_deg) - float(target_margin)
+    locked = (V[:, 2] <= BED_TOL) if fixed is None else np.asarray(fixed, dtype=bool)
+    near = None
+    if region is not None:
+        near = np.zeros(len(V), dtype=bool)
+        near[np.asarray(region, dtype=np.int64)] = True
+        for _ in range(2):                                   # la zona scolpita e due anelli attorno
+            m = near.copy()
+            m[edges[:, 0]] |= near[edges[:, 1]]
+            m[edges[:, 1]] |= near[edges[:, 0]]
+            near = m
+    moved = np.zeros(len(V), dtype=bool)
+    worst, passes = 0.0, 0
+    for it in range(max_iter + 1):
+        n, areas = face_normals_areas(V, F)
+        lean = np.abs(n[:, 2]) if two_sided else np.clip(-n[:, 2], 0.0, 1.0)
+        if not two_sided:
+            lean = np.where(V[:, 2][F].max(axis=1) <= BED_TOL, 0.0, lean)
+        ang = np.degrees(np.arcsin(np.clip(lean, 0.0, 1.0)))
+        cand = areas > 1e-9
+        if near is not None:
+            cand &= near[F].any(axis=1)
+        bad = cand & (ang > target)
+        worst = float(ang[cand].max()) if cand.any() else 0.0
+        passes = it
+        if not bad.any() or it == max_iter:
+            break
+        sel = np.zeros(len(V), dtype=bool)
+        sel[np.unique(F[bad])] = True
+        for _ in range(grow):
+            m = sel.copy()
+            m[edges[:, 0]] |= sel[edges[:, 1]]
+            m[edges[:, 1]] |= sel[edges[:, 0]]
+            sel = m
+        sel &= ~locked
+        if not sel.any():
+            break
+        avg = neighbor_mean(V, edges)
+        k = 2 if horizontal else 3
+        V[sel, :k] += strength * (avg[sel, :k] - V[sel, :k])
+        moved |= sel
+    return {"moved": np.where(moved)[0], "passes": passes, "max_deg": worst, "ok": worst <= float(limit_deg) + 0.5}

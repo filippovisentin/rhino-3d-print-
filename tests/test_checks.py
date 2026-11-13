@@ -186,3 +186,27 @@ def test_relax_overhang_removes_local_bulge_only():
     moved = np.linalg.norm(new - skin, axis=2) > 1e-9
     assert moved.sum() < 0.1 * moved.size                 # solo la zona del rigonfiamento
     assert np.allclose(new[:, :, 2], skin[:, :, 2])        # le quote non cambiano
+
+
+def test_relax_overhang_mesh_fixes_only_the_sculpted_region():
+    """Blob con base piana: un colpo di pennello verso l'esterno crea uno sbalzo; la correzione lo
+    riporta sotto il limite nella zona scolpita e lascia intatto il resto."""
+    from generative_print import generators, sculpt
+    V, F = generators.build_blob({"blob": {"radius": 40.0, "height": 80.0, "subdivisions": 4}})
+    edges = sculpt.edge_list(F)
+    lim = 43.0
+    side = V[np.argmin(np.abs(V[:, 2] - 45.0) + np.abs(V[:, 1]) + 10.0 * (V[:, 0] < 0))]   # punto sul fianco
+    before = V.copy()
+    idx = sculpt.dab(V, checks.vertex_normals(V, F), edges, side, 12.0, 20.0, "draw")
+    assert len(idx) > 5
+
+    def worst(P, vertices):
+        ang, areas, bed = checks.overhang_angles(P, F)
+        m = np.isin(F, vertices).any(axis=1) & ~bed
+        return float(ang[m].max())
+    assert worst(V, idx) > lim + 5.0                      # il rigonfiamento ha un sotto ripido
+    res = sculpt.relax_overhang_mesh(V, F, edges, lim, region=idx)
+    assert res["ok"] and worst(V, idx) <= lim + 0.5
+    far = np.linalg.norm(before - side, axis=1) > 30.0     # lontano dal colpo non cambia niente
+    assert np.allclose(V[far], before[far])
+    assert checks.topology(V, F)["watertight"]
