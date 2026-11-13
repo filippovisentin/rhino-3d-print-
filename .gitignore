@@ -5,3 +5,4 @@ __pycache__/
 .claude/
 CLAUDE.local.md
 *.3dmbak
+export/

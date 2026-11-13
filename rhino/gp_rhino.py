@@ -80,9 +80,13 @@ def ensure_layer(doc, name, color):
 
 
 def remove_named(doc, prefix):
-    for obj in list(doc.Objects):
+    """Elimina gli oggetti il cui nome inizia con `prefix`, compresi quelli nascosti."""
+    settings = Rhino.DocObjects.ObjectEnumeratorSettings()
+    settings.HiddenObjects = True
+    settings.LockedObjects = True
+    for obj in list(doc.Objects.GetObjectList(settings)):
         if (obj.Attributes.Name or "").startswith(prefix):
-            doc.Objects.Delete(obj.Id, True)
+            doc.Objects.Delete(obj, True, True)
 
 
 def add_mesh(doc, mesh, name, layer="GP", color=(225, 222, 214), meta=None):
