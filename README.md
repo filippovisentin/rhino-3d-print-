@@ -8,7 +8,7 @@ Generative design per la stampa 3D dentro Rhino 8: un agente AI genera lampade e
 
 ## Cosa c'è
 
-- **Slicer interno a Rhino**: una finestra con i parametri di stampa di ciò che hai disegnato (mesh, polisuperfici, estrusioni, SubD): stampante, materiale, strato, pareti, riempimento, supporti; controlli di stampabilità, stime di peso e tempo, mappa degli sbalzi e anteprima strato per strato. Un pulsante lancia lo slicer vero (Bambu Studio) con le stesse impostazioni, un altro apre la modifica plastica sull'oggetto.
+- **Slicer interno a Rhino**: una finestra con i parametri di stampa di ciò che hai disegnato (mesh, polisuperfici, estrusioni, SubD): stampante, materiale, strato, pareti, riempimento, supporti; controlli di stampabilità, stime di peso e tempo, mappa degli sbalzi, anteprima strato per strato, supporti in anteprima e orientamento di stampa (anche automatico). Un pulsante lancia lo slicer vero (Bambu Studio) con le stesse impostazioni, un altro apre la modifica plastica sull'oggetto.
 - **Due generatori**: lampade (diffusore con foro per portalampada E27) e vasi (sezione circolare, a lobi o poligonale con spigoli raccordati, che può ruotare lungo l'altezza; fondo pieno; capienza in ml; parete vera oppure modalità spirale degli slicer, con controllo di un solo contorno per strato).
 - **Ciclo chiuso** genera → verifica → critica → correggi, con un diario HTML di ogni iterazione: [`runs/2026-11-13_lampada-nervature/journal.html`](runs/2026-11-13_lampada-nervature/journal.html).
 - **Editor plastico in Rhino 8** (`rhino/avvia_editor.py`): pennelli Tira/Spingi, Gonfia, Liscia, Appiattisci, Pizzica, Afferra; simmetria radiale; mappa degli sbalzi in tempo reale (giallo vicino alla soglia, rosso oltre); anteprima a strati; verifica di stampa ed esportazione STL dal pannello.
@@ -52,7 +52,7 @@ Ciclo guidato dall'agente: serve Rhino 8 con il pacchetto Rhino-MCP-Platform e i
 - `generative_print/`: nucleo in solo numpy (gira anche nel Python 3.9 di Rhino): `generators`, `checks`, `sculpt`, `slicer`, `mesh_io`, `verify`, `journal`, `deliver`, `printcheck` (analisi di un solido qualsiasi), `bambu` (confronto con lo slicer, unico modulo che lancia un programma esterno).
 - `rhino/`: ponte con Rhino (`gp_rhino.py`), slicer interno (`gp_slicer.py`), editor (`gp_editor.py`), calcolo del componente Grasshopper (`gp_gh.py`).
 - `grasshopper/`: definizione `.gh`, script del componente e script che la costruisce.
-- `tests/`: 44 test delle misure su solidi dal risultato noto (cubi, coni, cilindri, poligoni esatti).
+- `tests/`: 47 test delle misure su solidi dal risultato noto (cubi, coni, cilindri, poligoni esatti).
 - `runs/`: una cartella per corsa, con parametri, STL, metriche, viste e note di ogni iterazione.
 
 ## Limiti dichiarati

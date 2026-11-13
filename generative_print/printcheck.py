@@ -49,7 +49,50 @@ def support_volume(V, F, over_mask, density=0.12):
     return float((areas[over_mask] * np.abs(n[over_mask, 2]) * zc).sum()) * density
 
 
-def analyse(V, F, over=None):
+SUPPORT_DENSITY = 0.12          # frazione di materiale dentro il volume dei supporti (ipotesi)
+
+
+def support_columns(V, F, over_mask, raycast, spacing=3.0):
+    """Dove andrebbero i supporti: una colonna per ogni punto di una griglia orizzontale (passo
+    'spacing') che cade sotto una faccia oltre soglia. Ogni colonna scende dalla faccia fino al piano
+    oppure fino al primo pezzo di modello che incontra. Restituisce (N x 4): x, y, z alto, z basso.
+    raycast(origini, direzioni) -> distanze, come checks.raycast_numpy(V, F)."""
+    pts = []
+    for a, b, c in V[F[over_mask]]:
+        lo = np.minimum(np.minimum(a, b), c)[:2]
+        hi = np.maximum(np.maximum(a, b), c)[:2]
+        xs = np.arange(math.ceil(lo[0] / spacing), math.floor(hi[0] / spacing) + 1) * spacing
+        ys = np.arange(math.ceil(lo[1] / spacing), math.floor(hi[1] / spacing) + 1) * spacing
+        if len(xs) == 0 or len(ys) == 0:
+            continue
+        gx, gy = np.meshgrid(xs, ys)
+        p = np.c_[gx.ravel(), gy.ravel()]
+        v0, v1 = (b - a)[:2], (c - a)[:2]
+        den = v0[0] * v1[1] - v0[1] * v1[0]
+        if abs(den) < 1e-12:
+            continue
+        d = p - a[:2]
+        u = (d[:, 0] * v1[1] - d[:, 1] * v1[0]) / den
+        w = (v0[0] * d[:, 1] - v0[1] * d[:, 0]) / den
+        inside = (u >= 0) & (w >= 0) & (u + w <= 1)
+        if inside.any():
+            z = a[2] + u[inside] * (b[2] - a[2]) + w[inside] * (c[2] - a[2])
+            pts.append(np.c_[p[inside], z])
+    if not pts:
+        return np.zeros((0, 4))
+    P = np.vstack(pts)
+    P = P[np.unique(np.round(P[:, :3], 3), axis=0, return_index=True)[1]]
+    P = P[P[:, 2] > 0.05]
+    if len(P) == 0:
+        return np.zeros((0, 4))
+    down = np.tile([0.0, 0.0, -1.0], (len(P), 1))
+    dist = np.asarray(raycast(P - [0.0, 0.0, 0.02], down), dtype=float)
+    bottom = np.where(np.isfinite(dist), np.maximum(0.0, P[:, 2] - 0.02 - dist), 0.0)
+    return np.c_[P, bottom]
+
+
+def analyse(V, F, over=None, raycast=None, support_spacing=3.0):
+    """raycast (facoltativo): se dato e i supporti sono attivi, li stima a colonne (support_columns)."""
     s = settings(over)
     V = np.asarray(V, dtype=float)
     lift = float(V[:, 2].min())
@@ -88,7 +131,14 @@ def analyse(V, F, over=None):
         st = checks.stability(V, F)
         rows.append(("Stabilita", st["margin_mm"] > 0, "baricentro a %.1f mm dal bordo dell'appoggio" % st["margin_mm"]))
         vol, ext = material(V, F, s)
-        sup = support_volume(V, F, over_mask) if (sup_on and needs_support) else 0.0
+        sup = 0.0
+        if sup_on and needs_support:
+            if raycast is not None:
+                cols = support_columns(V, F, over_mask, raycast, support_spacing)
+                out["support_columns"] = cols
+                sup = float((cols[:, 2] - cols[:, 3]).sum()) * support_spacing ** 2 * SUPPORT_DENSITY
+            else:
+                sup = support_volume(V, F, over_mask, SUPPORT_DENSITY)
         rho = float(s["density_g_cm3"]) / 1000.0
         fil = math.pi * (float(s["filament_diameter"]) / 2.0) ** 2
         out.update({"volume_cm3": vol / 1000.0, "extruded_cm3": (ext + sup) / 1000.0,
@@ -114,7 +164,10 @@ def report(res):
         L.append("Peso %.1f g | filo %.1f m | tempo circa %.1f h (stime geometriche)"
                  % (res["mass_g"], res["filament_m"], res["time_h"]))
         if res.get("support_cm3", 0) > 0:
-            L.append("di cui supporti circa %.1f cm3 (stima molto grossolana)" % res["support_cm3"])
+            cols = res.get("support_columns")
+            L.append("di cui supporti circa %.1f cm3%s (stima: riempiti al %d%%)"
+                     % (res["support_cm3"], (", %d colonne in anteprima" % len(cols)) if cols is not None else "",
+                        round(100 * SUPPORT_DENSITY)))
     else:
         L.append("Mesh aperta: volume, peso e tempo non calcolabili. Chiudi il solido.")
     if res["needs_support"] and not res["settings"]["supports"]:

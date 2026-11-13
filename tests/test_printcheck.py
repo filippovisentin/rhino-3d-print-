@@ -87,3 +87,21 @@ def test_best_orientation_flips_the_table():
     R = printcheck.rotation_to_down([1.0, 0.0, 0.0])
     assert np.allclose(R @ np.array([1.0, 0.0, 0.0]), [0, 0, -1]) and np.allclose(R @ R.T, np.eye(3))
     assert np.linalg.det(R) == pytest.approx(1.0)
+
+
+def test_support_columns_under_the_table_top():
+    """Tavolo: i supporti stanno sotto il piano (3600 mm2, alto 30 mm) e scendono fino al piatto."""
+    from generative_print import checks
+    Va, Fa = box(10, 10, 30)
+    Vb, Fb = box(60, 60, 5, z0=30)
+    Vb = Vb - [25, 25, 0]
+    V, F = np.vstack([Va, Vb]), np.vstack([Fa, Fb + 8])
+    res = printcheck.analyse(V, F, {"supports": True}, raycast=checks.raycast_numpy(V, F))
+    cols = res["support_columns"]
+    assert len(cols) == pytest.approx(3600.0 / 9.0, rel=0.1)             # una colonna ogni 3 x 3 mm
+    assert np.allclose(cols[:, 2], 30.0) and cols[:, 3].max() <= 30.0
+    free = (np.abs(cols[:, 0] - 5) > 6) | (np.abs(cols[:, 1] - 5) > 6)   # fuori dalla gamba: fino al piatto
+    assert np.allclose(cols[free, 3], 0.0)
+    expected = 3600.0 * 30.0 * printcheck.SUPPORT_DENSITY / 1000.0
+    assert res["support_cm3"] == pytest.approx(expected, rel=0.12)
+    assert "colonne" in printcheck.report(res)

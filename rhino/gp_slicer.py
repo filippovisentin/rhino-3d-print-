@@ -139,6 +139,8 @@ class Job(object):
         self.zsorted = zmax[self.zorder]                          # e un prefisso di questo elenco
         self.face_sets = None
         self.layer_faces = None
+        self.ray_mesh = None
+        self.columns = None       # supporti in anteprima: x, y, z alto, z basso (pezzo appoggiato al piano)
         self.walls = []           # (indice di parete, rg.Polyline)
         self.infill = []          # rg.Line
         self.open_loops = []      # rg.Polyline non chiuse: mesh aperta a quella quota
@@ -170,6 +172,12 @@ class Conduit(Rhino.Display.DisplayConduit):
                                   rg.Interval(-bed[1] / 2.0, bed[1] / 2.0))
             col = sd.Color.FromArgb(90, 110, 150) if fits else sd.Color.FromArgb(215, 45, 40)
             e.Display.DrawPolyline(rect.ToPolyline(), col, 2)
+            if j.columns is not None:                    # supporti: fino allo strato corrente, o interi
+                top = (sl.layer_index + 1) * float(sl.settings["layer"]) if sl.layer_on else float("inf")
+                lines = [rg.Line(rg.Point3d(x, y, j.z0 + zb), rg.Point3d(x, y, j.z0 + min(zt, top)))
+                         for x, y, zt, zb in j.columns.tolist() if zb < top]
+                if lines:
+                    e.Display.DrawLines(lines, sd.Color.FromArgb(40, 160, 90), 2)
             if sl.layer_on:
                 if j.layer_faces is not None and j.layer_faces.Length:
                     e.Display.DrawMeshShaded(j.show, sl.mat, j.layer_faces)
@@ -275,7 +283,14 @@ class Slicer(object):
         if j is None:
             self.refresh()
             return None
-        res = printcheck.analyse(j.Vw, j.F, self.settings)
+        rc = None
+        if self.settings["supports"]:
+            if j.ray_mesh is None:                       # mesh appoggiata al piano, per i raggi dei supporti
+                j.ray_mesh = gp_rhino.to_rhino_mesh(j.Vw, j.F)
+            rc = gp_rhino.raycast_rhino(j.ray_mesh)
+        res = printcheck.analyse(j.Vw, j.F, self.settings, raycast=rc)
+        cols = res.get("support_columns")
+        j.columns = cols if cols is not None and len(cols) else None
         over, warn = res["over_mask"], res["warn_mask"]
         j.face_sets = (int_array(np.where(~over & ~warn)[0]), int_array(np.where(warn)[0]),
                        int_array(np.where(over)[0]))
