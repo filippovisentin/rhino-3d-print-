@@ -1,0 +1,17 @@
+{
+  "object": "lamp_shade",
+  "envelope": {"height": 220.0},
+  "profile": {"radii": [60.0, 85.0, 90.0, 70.0, 40.0]},
+  "ribs": {"count": 24, "amplitude": 0.06, "twist_deg": 90.0, "shape": "sine", "fade_bottom": 0.08, "fade_top": 0.0},
+  "wall": {"thickness": 1.6},
+  "floor": {"thickness": 3.0},
+  "fixture": {"hole_diameter": 40.5},
+  "constraints": {
+    "max_mass_g": 250.0,
+    "min_wall": 1.2,
+    "target_diameter": 180.0,
+    "diameter_tolerance": 3.0,
+    "fixture": {"socket": "E27", "hole_diameter": 40.0, "hole_tolerance": 1.0, "socket_height": 60.0,
+                "bulb_diameter": 60.0, "bulb_length": 110.0, "min_clearance": 20.0, "min_top_opening": 50.0}
+  }
+}
