@@ -149,7 +149,9 @@ def summary_charts(brief, iters):
     parts = [chart("Peso stimato", "g", series("mass"), hi=cons.get("max_mass_g")),
              chart("Sbalzo massimo", "gradi", series("overhang"), hi=lim),
              chart("Diametro", "mm", series("diameter"), lo=td - tol if td else None, hi=td + tol if td else None),
-             chart("Spessore (1° percentile)", "mm", series("wall"), lo=cons.get("min_wall")),
+             chart("Spessore (1° percentile)", "mm", series("wall"), lo=cons.get("min_wall"))
+             if iters[-1]["params"].get("print", {}).get("mode") != "spiral" else "",
+             chart("Capienza", "ml", series("capacity"), lo=cons.get("min_capacity_ml")),
              chart("Voto estetico", "su 10", scores, lo=thr)]
     return '<div class="charts">%s</div><p class="note">Cerchio pieno: dentro i limiti. Cerchio vuoto: fuori. ' \
            'Linee tratteggiate: limiti del brief. In ascissa il numero di iterazione.</p>' % "".join(parts)
@@ -206,8 +208,9 @@ def build(run_dir, extra_html=""):
             "<h1>%s</h1>" % esc(brief.get("title", "Diario delle iterazioni")),
             '<p class="brief">%s</p>' % esc(brief["brief"]),
             "<p>%d iterazioni registrate, %d stampabili secondo le verifiche. Ciclo: genera in Rhino 8, "
-            "misura l'STL esportato, critica le viste, correggi motivando. Le iterazioni finali sono "
-            "modellate con i pennelli dell'editor plastico.</p>" % (len(iters), n_ok),
+            "misura l'STL esportato, critica le viste, correggi motivando.%s</p>"
+            % (len(iters), n_ok, " Le iterazioni finali sono modellate con i pennelli dell'editor plastico."
+               if any("sculpt" in it["params"] for it in iters) else ""),
             summary_charts(brief, iters)]
     body += [iteration_card(it) for it in iters]
     body.append(extra_html)

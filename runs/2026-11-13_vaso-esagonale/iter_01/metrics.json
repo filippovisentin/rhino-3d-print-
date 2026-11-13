@@ -1,0 +1,173 @@
+{
+  "topology": {
+    "naked_edges": 0,
+    "duplicated_edges": 0,
+    "degenerate_faces": 0,
+    "bodies": 1,
+    "watertight": true
+  },
+  "overhang": {
+    "max_deg": 29.463414585457663,
+    "area_over_mm2": 0.0,
+    "faces_over": 0,
+    "bed_contact_mm2": 5460.29895206,
+    "limit_deg": 45.0
+  },
+  "islands": 0,
+  "bbox": {
+    "min": [
+      -69.9976,
+      -67.3949,
+      0.0
+    ],
+    "max": [
+      69.9976,
+      67.3949,
+      200.0
+    ],
+    "size": [
+      139.9952,
+      134.7898,
+      200.0
+    ]
+  },
+  "stability": {
+    "margin_mm": 40.7123,
+    "centroid": [
+      -1.2709375644384487e-16,
+      -1.76243295068613e-16,
+      99.8411168300187
+    ],
+    "footprint_points": 241
+  },
+  "material": {
+    "volume_cm3": 1984.6230401029877,
+    "surface_cm2": 0.0,
+    "mass_solid_g": 2460.932569727705,
+    "mass_est_g": 46.69264495633369,
+    "filament_m": 15.655279001101487,
+    "time_h_rough": 1.7433036498033785,
+    "spiral_path_m": 369.85688526783304
+  },
+  "thickness": {
+    "min": 0.45,
+    "p1": 0.45,
+    "p5": 0.45,
+    "median": 0.45,
+    "samples": 0
+  },
+  "capacity_ml": 1946.7334300747932,
+  "spiral_loops": {
+    "sampled": 200,
+    "bad": 0
+  },
+  "checks": [
+    {
+      "id": "closed",
+      "label": "Mesh chiusa",
+      "value": 0,
+      "unit": "spigoli aperti",
+      "limit": "0",
+      "pass": true,
+      "note": "1 corpo/i, 0 facce degeneri"
+    },
+    {
+      "id": "overhang",
+      "label": "Sbalzo massimo",
+      "value": 29.5,
+      "unit": "gradi",
+      "limit": "<= 45",
+      "pass": true,
+      "note": "0 mm2 oltre soglia (0 facce)"
+    },
+    {
+      "id": "islands",
+      "label": "Isole (partenze nel vuoto)",
+      "value": 0,
+      "unit": "punti",
+      "limit": "0",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "bed",
+      "label": "Ingombro",
+      "value": [
+        140.0,
+        134.8,
+        200.0
+      ],
+      "unit": "mm",
+      "limit": "<= 256 x 256 x 256",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "adhesion",
+      "label": "Appoggio sul piano",
+      "value": 5460.0,
+      "unit": "mm2",
+      "limit": ">= 100",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "stability",
+      "label": "Stabilita (baricentro dentro l'appoggio)",
+      "value": 40.7,
+      "unit": "mm",
+      "limit": "> 0",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "mass",
+      "label": "Peso stimato",
+      "value": 46.7,
+      "unit": "g",
+      "limit": "<= 100",
+      "pass": true,
+      "note": "pieno al 100%: 2460.9 g"
+    },
+    {
+      "id": "wall",
+      "label": "Parete in spirale (una linea)",
+      "value": 0.45,
+      "unit": "mm",
+      "limit": ">= ugello 0.4",
+      "pass": true,
+      "note": "lo spessore e la larghezza di linea impostata nello slicer"
+    },
+    {
+      "id": "capacity",
+      "label": "Capienza",
+      "value": 1947.0,
+      "unit": "ml",
+      "limit": ">= 1500",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "spiral",
+      "label": "Un solo contorno per strato (spirale)",
+      "value": 0,
+      "unit": "quote fuori regola",
+      "limit": "0",
+      "pass": true,
+      "note": "200 quote controllate, una ogni mm"
+    },
+    {
+      "id": "watertight",
+      "label": "Tenuta all'acqua (solo informativo)",
+      "value": "non garantita",
+      "unit": "",
+      "limit": "non richiesta",
+      "pass": true,
+      "note": "parete singola: per l'acqua serve un rivestimento interno o un inserto"
+    }
+  ],
+  "pass": true,
+  "layers": 1000,
+  "file": "model.stl",
+  "triangles": 60480
+}

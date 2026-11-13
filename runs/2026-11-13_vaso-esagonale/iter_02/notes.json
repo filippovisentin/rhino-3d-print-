@@ -1,0 +1,13 @@
+{
+  "title": "Parete più rigida, torsione a 180°",
+  "changes": [
+    {"param": "print.line_width", "from": 0.45, "to": 0.7, "why": "una sola linea da 0,45 mm su 200 mm di altezza è troppo flessibile"},
+    {"param": "section.depth", "from": 0.15, "to": 0.18, "why": "spigoli dell'esagono più netti"},
+    {"param": "section.twist_deg", "from": 120, "to": 180, "why": "torsione più leggibile"},
+    {"param": "profile.radii", "from": "[45, 62, 70, 60, 48]", "to": "[44, 58, 64, 58, 50]", "why": "ventre più stretto, forma più slanciata"}
+  ],
+  "reasoning": "Previsioni: circa 68 g, circa 1650 ml, sbalzo sotto 40°. Misurati: 66,5 g, 1674 ml, 37,2°. Vincoli tutti rispettati.",
+  "critique": {"proportions": 7, "rhythm": 7, "brief_fit": 5.5, "silhouette": 7, "score": 6.6,
+    "text": "Più slanciato e la torsione a 180° funziona. Ma la vista dall'alto dice la verità: la sezione è un fiore a sei lobi con i lati concavi, non un esagono. Aumentare il rientro peggiora le cose, perché scava i lati invece di raddrizzarli."},
+  "decision": "Non è un problema di parametri ma del generatore: la sezione 'morbida' è un coseno, che per costruzione non ha tratti rettilinei. Aggiungo al generatore una sezione a poligono vero: lati diritti e spigoli raccordati con raggio impostabile (style = polygon, corner = raggio dello spigolo in frazione del raggio esterno), con test sulla forma esatta. La uso con raggio di raccordo 0,12."
+}

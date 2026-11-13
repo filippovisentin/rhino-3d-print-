@@ -60,13 +60,21 @@ def build(repo, save=True):
         ("parete", "Parete (mm)", 0.8, 1.35, 3.0, 2),
         ("fondo", "Fondo (mm, 0 = aperto)", 0, 3, 6, 1),
         ("foro", "Foro portalampada (mm, 0 = vaso)", 0, 40.5, 60, 1),
+        ("lati", "Sezione: lati (0 = cerchio)", 0, 0, 12, -1),
+        ("stile", "Sezione: 0 lobi, 1 poligono", 0, 1, 1, -1),
+        ("rientro", "Lobi: rientro dei lati", 0, 0.0, 0.4, 3),
+        ("raccordo", "Poligono: raggio raccordo", 0, 0.12, 1.0, 2),
+        ("rot_sezione", "Sezione: rotazione (gradi)", -180, 0, 180, 0),
+        ("capienza_min", "Vaso: capienza minima (ml)", 0, 0, 3000, 0),
+        ("linea", "Larghezza linea (mm)", 0.4, 0.45, 1.0, 2),
         ("diametro", "Diametro obiettivo (mm, 0 = libero)", 0, 180, 250, 0),
         ("peso_max", "Peso massimo (g)", 50, 250, 600, 0),
         ("limite", "Sbalzo limite (gradi)", 30, 45, 70, 0),
         ("risoluzione", "Lato maglia (mm)", 1.0, 2.5, 5.0, 1),
         ("strato", "Anteprima strato (0 = spenta)", 0, 0, 1500, -1),
     ]
-    toggles = [("verifica", "Verifica completa", False, "toggle"), ("ricarica", "Ricarica codice", False, "toggle"),
+    toggles = [("verifica", "Verifica completa", False, "toggle"),
+               ("spirale", "Vaso in modalita spirale", False, "toggle"), ("ricarica", "Ricarica codice", False, "toggle"),
                ("esporta", "Esporta STL", False, "button"), ("editor", "Apri nell'editor plastico", False, "button")]
     texts = [("file", os.path.join(repo, "export", "lampada_gh")), ("cartella", None)]
 
@@ -133,8 +141,8 @@ def build(repo, save=True):
     # ---------------------------------------------------------------- uscite
     report = ghs.GH_Panel()
     report.NickName = "Verifica di stampa"
-    place(report, 900, 170)
-    report.Attributes.Bounds = sd.RectangleF(900, 170, 520, 300)
+    place(report, 900, 185)
+    report.Attributes.Bounds = sd.RectangleF(900, 185, 520, 300)
     report.AddSource(outp("report"))
 
     def preview(src, color, x, y, label):
@@ -160,9 +168,10 @@ def build(repo, save=True):
                      "Arancio = vicino alla soglia di sbalzo, rosso = oltre (servirebbero supporti).\n"
                      "'Verifica completa' aggiunge spessori e portalampada (piu lento).\n"
                      "'Apri nell'editor plastico' porta la forma ai pennelli.\n"
-                     "Foro 0 = vaso. Valori iniziali = iterazione 5 della demo.")
+                     "Foro 0 = vaso: sezione poligonale, capienza, modalita spirale.\n"
+                     "Valori iniziali = iterazione 5 della demo della lampada.")
     place(note, 900, 30)
-    note.Attributes.Bounds = sd.RectangleF(900, 30, 520, 125)
+    note.Attributes.Bounds = sd.RectangleF(900, 30, 520, 140)
 
     doc.NewSolution(False)
     if save:

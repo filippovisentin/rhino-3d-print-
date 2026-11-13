@@ -1,0 +1,10 @@
+<section class="card"><div class="head"><span class="num">METODO E LIMITI</span><h2>Cosa è stato misurato e cosa no</h2></div>
+<ul>
+<li><b>Modalità spirale</b>: lo slicer stampa una sola linea continua sul contorno esterno. Per questo l'STL è un <b>solido pieno</b>, mentre le viste mostrano il pezzo come uscirà dalla stampante (parete di una linea, aperto in alto).</li>
+<li><b>Un solo contorno per strato</b>: la sezione viene calcolata a ogni mm di altezza e i suoi contorni si contano seguendo gli spigoli della mesh, senza confrontare coordinate. Con due contorni alla stessa quota la spirale non si può stampare.</li>
+<li><b>Peso in spirale</b>: lunghezza del contorno esterno (misurata ogni mm) × larghezza della linea × altezza dello strato, più gli strati pieni del fondo. Densità del PLA 1,24 g/cm³, ipotizzata.</li>
+<li><b>Capienza</b>: integrale delle aree delle sezioni interne (contorno esterno meno la larghezza della linea), dal fondo al bordo. Su un cilindro di prova coincide con la formula entro lo 0,2%.</li>
+<li><b>Generatore modificato durante la corsa</b>: dopo l'iterazione 2 la critica sulla vista dall'alto ha mostrato che la sezione "morbida" non può avere lati diritti. Ho aggiunto la sezione a poligono raccordato, con test sulla forma esatta (lati rettilinei, apotema, continuità del contorno).</li>
+<li><b>Critica estetica</b>: giudizio del modello (Claude) sulle viste. È un parere, non una misura.</li>
+<li><b>Non verificato</b>: niente stampa e niente slicer. La rigidità della parete (0,7 mm) è una scelta di esperienza, non calcolata. La tenuta all'acqua non è garantita: il brief chiede un vaso per fiori secchi.</li>
+</ul></section>

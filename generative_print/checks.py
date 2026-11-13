@@ -263,13 +263,70 @@ def material(V, F, pr):
             "time_h_rough": est_vol / float(pr["flow_mm3_s"]) / 3600.0}
 
 
+# ---------------------------------------------------------------- vasi
+def spiral_material(V, F, pr):
+    """Materiale in modalita spirale: una linea sul contorno esterno di ogni strato
+    piu gli strati pieni del fondo."""
+    from .slicer import slice_segments
+    vol_solid, _ = volume_centroid(V, F)
+    h, lw = float(pr["layer"]), float(pr["line_width"])
+    nb = int(pr.get("bottom_layers", 4))
+    zs = np.arange(h / 2.0, float(V[:, 2].max()), h)
+    sampled = zs[::5]                                   # un contorno ogni 1 mm, poi si scala
+    length = 0.0
+    for z in sampled:
+        seg = slice_segments(V, F, z)
+        if len(seg):
+            length += float(np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1).sum())
+    length *= len(zs) / float(max(1, len(sampled)))
+    _, areas, on_bed = overhang_angles(V, F)
+    base_area = float(areas[on_bed].sum())              # area d'appoggio = fondo pieno
+    vol = length * lw * h + base_area * h * nb
+    rho = float(pr["density_g_cm3"]) / 1000.0
+    fil_area = math.pi * (float(pr["filament_diameter"]) / 2.0) ** 2
+    return {"volume_cm3": vol_solid / 1000.0, "surface_cm2": 0.0, "mass_solid_g": vol_solid * rho,
+            "mass_est_g": vol * rho, "filament_m": vol / fil_area / 1000.0,
+            "time_h_rough": vol / float(pr["flow_mm3_s"]) / 3600.0, "spiral_path_m": length / 1000.0}
+
+
+def vase_checks(V, F, params, result, checks, skin=None):
+    """Controlli propri del vaso: capienza, fondo a tenuta, contorno unico in spirale."""
+    from . import generators, slicer
+    pr, cons = params["print"], params.get("constraints", {})
+    spiral = pr.get("mode") == "spiral"
+    if skin is not None:
+        wall = float(pr["line_width"]) if spiral else float(params["wall"]["thickness"])
+        floor = (float(pr["layer"]) * int(pr.get("bottom_layers", 4)) if spiral
+                 else float(params["floor"]["thickness"]))
+        cap = generators.capacity_ml(skin, wall, floor)
+        result["capacity_ml"] = cap
+        if "min_capacity_ml" in cons:
+            checks.append(_check("capacity", "Capienza", round(cap, 0), "ml",
+                                 ">= %g" % cons["min_capacity_ml"], cap >= cons["min_capacity_ml"]))
+    if spiral:
+        prof = slicer.loops_profile(V, F, float(pr["layer"]), 1.0)
+        bad = [z for z, n in prof if n != 1]
+        result["spiral_loops"] = {"sampled": len(prof), "bad": len(bad)}
+        checks.append(_check("spiral", "Un solo contorno per strato (spirale)", len(bad),
+                             "quote fuori regola", "0", len(bad) == 0,
+                             "%d quote controllate, una ogni mm" % len(prof)))
+        need = bool(cons.get("watertight", False))
+        checks.append(_check("watertight", "Tenuta all'acqua" + ("" if need else " (solo informativo)"),
+                             "non garantita", "", "richiesta" if need else "non richiesta", not need,
+                             "parete singola: per l'acqua serve un rivestimento interno o un inserto"))
+    else:
+        fl = float(params["floor"]["thickness"])
+        checks.append(_check("floor", "Fondo a tenuta", round(fl, 2), "mm", ">= 1.2",
+                             fl >= 1.2 - 1e-9, "%d strati pieni" % int(round(fl / float(pr["layer"])))))
+
+
 # ---------------------------------------------------------------- rapporto
 def _check(cid, label, value, unit, limit, ok, note=""):
     return {"id": cid, "label": label, "value": value, "unit": unit, "limit": limit,
             "pass": bool(ok), "note": note}
 
 
-def run_checks(V, F, params, raycast=None, samples=3000):
+def run_checks(V, F, params, raycast=None, samples=3000, skin=None):
     """Esegue tutte le verifiche. `params` e il dizionario gia risolto (vedi generators.resolve)."""
     V = np.asarray(V, dtype=float)
     F = np.asarray(F, dtype=np.int64)
@@ -314,18 +371,32 @@ def run_checks(V, F, params, raycast=None, samples=3000):
     if topo["watertight"]:
         mat = material(V, F, pr)
         result["material"] = mat
+        if pr.get("mode") == "spiral":
+            mat = spiral_material(V, F, pr)
+            result["material"] = mat
         if "max_mass_g" in cons:
             checks.append(_check("mass", "Peso stimato", round(mat["mass_est_g"], 1), "g",
                                  "<= %g" % cons["max_mass_g"], mat["mass_est_g"] <= cons["max_mass_g"],
                                  "pieno al 100%%: %.1f g" % mat["mass_solid_g"]))
         rc = raycast or default_raycaster(V, F)
-        th = thickness(V, F, rc, samples=samples)
+        if pr.get("mode") == "spiral":       # solido pieno per scelta: la parete e una linea
+            lw = float(pr["line_width"])
+            th = {"min": lw, "p1": lw, "p5": lw, "median": lw, "samples": 0}
+        else:
+            th = thickness(V, F, rc, samples=samples)
         min_wall = float(cons.get("min_wall", 2 * float(pr["nozzle"])))
         result["thickness"] = th
-        checks.append(_check("wall", "Spessore minimo (1 percentile)", round(th["p1"], 2), "mm",
-                             ">= %g" % min_wall,
-                             th["p1"] >= min_wall - 0.02 and th["min"] >= 0.5 * min_wall,
-                             "minimo assoluto %.2f mm (deve essere >= %.2f), %d campioni" % (th["min"], 0.5 * min_wall, th["samples"])))
+        if pr.get("mode") == "spiral":
+            lw = float(pr["line_width"])
+            checks.append(_check("wall", "Parete in spirale (una linea)", round(lw, 2), "mm",
+                                 ">= ugello %g" % float(pr["nozzle"]), lw >= float(pr["nozzle"]),
+                                 "lo spessore e la larghezza di linea impostata nello slicer"))
+        else:
+            checks.append(_check("wall", "Spessore minimo (1 percentile)", round(th["p1"], 2), "mm",
+                                 ">= %g" % min_wall,
+                                 th["p1"] >= min_wall - 0.02 and th["min"] >= 0.5 * min_wall,
+                                 "minimo assoluto %.2f mm (deve essere >= %.2f), %d campioni"
+                                 % (th["min"], 0.5 * min_wall, th["samples"])))
         fx_cfg = cons.get("fixture")
         if fx_cfg:
             fx = fixture(V, F, rc, fx_cfg, float(params["floor"]["thickness"]))
@@ -352,6 +423,9 @@ def run_checks(V, F, params, raycast=None, samples=3000):
             checks.append(_check("diameter", "Diametro massimo", round(dia, 1), "mm",
                                  "%g +/- %g" % (cons["target_diameter"], tol),
                                  abs(dia - cons["target_diameter"]) <= tol))
+
+    if params.get("object") == "vase":
+        vase_checks(V, F, params, result, checks, skin)
 
     result["checks"] = checks
     result["pass"] = all(c["pass"] for c in checks)

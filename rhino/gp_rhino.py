@@ -104,7 +104,16 @@ def read_meta(obj):
 
 
 # ------------------------------------------------------------------ viste fisse
+def _settle(view):
+    """Attende che la vista abbia finito di ridisegnare (altrimenti la cattura puo uscire
+    a meta, con i fili della maglia al posto della superficie)."""
+    for _ in range(3):
+        view.Redraw()
+        Rhino.RhinoApp.Wait()
+
+
 def _capture(view, path, size=(900, 900)):
+    _settle(view)
     vc = Rhino.Display.ViewCapture()
     vc.Width, vc.Height = size
     vc.ScaleScreenItems = False
@@ -171,7 +180,7 @@ def run_iteration(doc, iter_dir, capture=True):
     setup_doc(doc)
     with open(os.path.join(iter_dir, "params.json"), encoding="utf-8") as fh:
         params = json.load(fh)
-    skin, V, F = generators.build_vessel(params)
+    skin, V, F = generators.build(params)
     return show_solid(doc, iter_dir, params, skin, V, F, capture)
 
 
@@ -182,13 +191,26 @@ def show_solid(doc, iter_dir, params, skin, V, F, capture=True):
     skin_mesh = to_rhino_mesh(skin.reshape(-1, 3), generators.skin_faces(nz, nt))
     skin_id = add_mesh(doc, skin_mesh, "gp_pelle", layer="GP::pelle", color=(120, 160, 210), meta=meta)
     doc.Objects.Hide(skin_id, True)
-    solid_id = add_mesh(doc, to_rhino_mesh(V, F), "gp_solido", layer="GP::solido")
+    Vv, Fv = display_solid(skin, params, V, F)
+    solid_id = add_mesh(doc, to_rhino_mesh(Vv, Fv), "gp_solido", layer="GP::solido")
     mesh_io.write_stl(os.path.join(iter_dir, "model.stl"), V, F)
+    np.save(os.path.join(iter_dir, "skin.npy"), skin)
     out = {"triangles": int(len(F)), "vertices": int(len(V)), "stl": os.path.join(iter_dir, "model.stl")}
     if capture:
-        out["views"] = capture_views(doc, os.path.join(iter_dir, "views"), solid_id, V, F)
+        out["views"] = capture_views(doc, os.path.join(iter_dir, "views"), solid_id, Vv, Fv)
     doc.Views.Redraw()
     return out
+
+
+def display_solid(skin, params, V, F):
+    """Geometria da mostrare: per il vaso in spirale il pezzo come uscira dalla stampante
+    (parete di una linea, aperto in alto), non il solido pieno che si esporta per lo slicer."""
+    p = generators.resolve(params)
+    if p.get("object") == "vase" and p["print"].get("mode") == "spiral":
+        pr = p["print"]
+        return generators.build_shell(skin, wall=float(pr["line_width"]),
+                                      floor=float(pr["layer"]) * int(pr.get("bottom_layers", 4)))
+    return V, F
 
 
 def skin_from_doc(doc):
@@ -247,6 +269,6 @@ def sculpt_step(doc, run_dir, n, session, note=""):
         json.dump(params, fh, indent=2)
     skin = session.V.reshape(session.grid[0], session.grid[1], 3).copy()
     np.save(os.path.join(iter_dir, "skin.npy"), skin)
-    V, F = generators.shell_from_params(skin, params)
+    V, F = generators.solid_from_skin(skin, params)
     _capture(doc.Views.ActiveView, os.path.join(iter_dir, "views", "editor.png"))   # mappa degli sbalzi
     return iter_dir, params, skin, V, F

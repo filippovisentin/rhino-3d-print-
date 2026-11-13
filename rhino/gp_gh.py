@@ -50,6 +50,8 @@ def params_from_inputs(i):
         cons["diameter_tolerance"] = 3.0
     if hole <= 0:
         cons.pop("fixture")                      # vaso: niente portalampada
+        if _num(i.get("capienza_min"), 0.0) > 0:
+            cons["min_capacity_ml"] = _num(i.get("capienza_min"), 0.0)
     else:
         cons["fixture"]["hole_diameter"] = round(hole - 0.5, 2)
     return {
@@ -62,8 +64,14 @@ def params_from_inputs(i):
         "wall": {"thickness": _num(i.get("parete"), 1.35)},
         "floor": {"thickness": _num(i.get("fondo"), 3.0)},
         "fixture": {"hole_diameter": max(0.0, hole)},
+        "section": {"sides": int(_num(i.get("lati"), 0)), "depth": _num(i.get("rientro"), 0.0),
+                    "style": "polygon" if int(_num(i.get("stile"), 0)) == 1 else "soft",
+                    "corner": _num(i.get("raccordo"), 0.12),
+                    "twist_deg": _num(i.get("rot_sezione"), 0.0), "ease": True},
         "mesh": {"edge": max(0.8, _num(i.get("risoluzione"), 2.5))},
-        "print": {"overhang_limit_deg": _num(i.get("limite"), 45.0)},
+        "print": {"overhang_limit_deg": _num(i.get("limite"), 45.0),
+                  "mode": "spiral" if (i.get("spirale") and hole <= 0) else "walls",
+                  "line_width": _num(i.get("linea"), 0.45)},
         "constraints": cons,
     }
 
@@ -78,7 +86,7 @@ def sub_mesh(V, F, mask):
     return gp_rhino.to_rhino_mesh(V[used], remap[faces])
 
 
-def quick_checks(V, F, p):
+def quick_checks(V, F, p, skin=None):
     """Controlli veloci, rifatti a ogni movimento di slider: chiusura, sbalzi, isole,
     ingombro, stabilita, peso e diametro. Spessori e portalampada solo con `verifica`."""
     pr = p["print"]
@@ -103,6 +111,23 @@ def quick_checks(V, F, p):
     if "target_diameter" in cons:
         rows.append(("Diametro", abs(dia - cons["target_diameter"]) <= cons["diameter_tolerance"],
                      "%.1f mm (%g +/- %g)" % (dia, cons["target_diameter"], cons["diameter_tolerance"])))
+    if p.get("object") == "vase":
+        spiral = pr.get("mode") == "spiral"
+        if spiral:
+            mat = checks.spiral_material(V, F, pr)
+            rows = [r for r in rows if r[0] != "Peso"]
+            rows.append(("Peso", mat["mass_est_g"] <= cons["max_mass_g"],
+                         "%.1f g in spirale (max %g)" % (mat["mass_est_g"], cons["max_mass_g"])))
+            prof = slicer.loops_profile(V, F, float(pr["layer"]), 5.0)
+            bad = sum(1 for _, n in prof if n != 1)
+            rows.append(("Spirale", bad == 0, "%d quote su %d con piu di un contorno" % (bad, len(prof))))
+        if skin is not None:
+            wall = float(pr["line_width"]) if spiral else float(p["wall"]["thickness"])
+            floor = (float(pr["layer"]) * int(pr.get("bottom_layers", 4)) if spiral
+                     else float(p["floor"]["thickness"]))
+            cap = generators.capacity_ml(skin, wall, floor)
+            need = cons.get("min_capacity_ml", 0.0)
+            rows.append(("Capienza", cap >= need, "%.0f ml%s" % (cap, (" (min %g)" % need) if need else "")))
     return rows, ov, mat, dia
 
 
@@ -112,8 +137,7 @@ def solve(i):
     p = generators.resolve(params_from_inputs(i))
     key = json.dumps(p, sort_keys=True)
     if _cache["key"] != key:
-        skin = generators.vessel_skin(p)
-        V, F = generators.shell_from_params(skin, p)
+        skin, V, F = generators.build(p)
         _cache.update(key=key, skin=skin, V=V, F=F, full=None,
                       solid=gp_rhino.to_rhino_mesh(V, F),
                       pelle=gp_rhino.to_rhino_mesh(skin.reshape(-1, 3), generators.skin_faces(*skin.shape[:2])))
@@ -124,7 +148,7 @@ def solve(i):
         warn = free & (ang > lim - 10.0) & ~over
         _cache["oltre"] = sub_mesh(V, F, over)
         _cache["vicino"] = sub_mesh(V, F, warn)
-        _cache["quick"] = quick_checks(V, F, p)
+        _cache["quick"] = quick_checks(V, F, p, skin)
     skin, V, F = _cache["skin"], _cache["V"], _cache["F"]
     rows, ov, mat, dia = _cache["quick"]
 
@@ -133,7 +157,7 @@ def solve(i):
     if i.get("verifica"):
         if _cache["full"] is None:
             rc = gp_rhino.raycast_rhino(_cache["solid"])
-            _cache["full"] = checks.run_checks(V, F, p, raycast=rc, samples=1200)
+            _cache["full"] = checks.run_checks(V, F, p, raycast=rc, samples=1200, skin=skin)
         full = _cache["full"]
         lines = checks.format_report(full).splitlines()
         passed = full["pass"]
@@ -175,8 +199,10 @@ def solve(i):
         _send_to_editor(p)
         lines.append("Pelle inviata all'editor plastico")
 
-    lines.append("Calcolo %.2f s, %d triangoli, forma %s" % (time.time() - t0, len(F),
-                                                             SHAPE_LABELS[SHAPES.index(p["ribs"]["shape"])]))
+    kind = "vaso" + (" in spirale" if p["print"].get("mode") == "spiral" else "") \
+        if p.get("object") == "vase" else "lampada"
+    ribs = ("nervature " + SHAPE_LABELS[SHAPES.index(p["ribs"]["shape"])]) if int(p["ribs"]["count"]) > 0         else "senza nervature"
+    lines.append("Calcolo %.2f s, %d triangoli, %s, %s" % (time.time() - t0, len(F), kind, ribs))
     out["report"] = "\n".join(lines)
     return out
 

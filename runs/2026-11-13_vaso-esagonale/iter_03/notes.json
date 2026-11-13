@@ -1,0 +1,11 @@
+{
+  "title": "Esagono vero: lati diritti e spigoli raccordati",
+  "changes": [
+    {"param": "section.style", "from": "soft", "to": "polygon", "why": "lati diritti invece di lobi a coseno (nuova funzione del generatore)"},
+    {"param": "section.corner", "from": "—", "to": 0.12, "why": "raccordo degli spigoli di circa 7 mm: spigolo netto alla vista, ma non vivo per la spirale"}
+  ],
+  "reasoning": "Stessi profilo, torsione e linea dell'iterazione 2; cambia solo la sezione. Misurati: sbalzo 36,4°, 65,1 g, capienza 1725 ml (+51 ml: i lati diritti racchiudono più area dei lobi), un solo contorno a ogni quota. Vincoli tutti rispettati.",
+  "critique": {"proportions": 7.5, "rhythm": 8, "brief_fit": 8.5, "silhouette": 8, "score": 8.0,
+    "text": "Ora il brief si legge: dall'alto è un esagono netto, e la torsione trasforma i sei spigoli in eliche che catturano la luce. La rotazione con partenza e arrivo dolci lascia piede e bordo dritti: l'oggetto appoggia e si chiude in modo calmo. Il ventre resta leggermente pieno, ma è coerente con la capienza richiesta."},
+  "decision": "Vincoli soddisfatti e voto 8,0 sopra la soglia di 7,5: mi fermo alla terza iterazione delle cinque previste. Margini: sbalzo 8,6° sotto il limite, peso 35 g sotto, capienza 225 ml sopra."
+}

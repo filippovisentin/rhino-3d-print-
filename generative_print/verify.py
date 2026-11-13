@@ -14,7 +14,13 @@ from . import checks, generators, mesh_io
 
 def verify_file(stl_path, params=None, samples=3000):
     V, F = mesh_io.read_stl(stl_path)
-    result = checks.run_checks(V, F, generators.resolve(params), samples=samples)
+    p = generators.resolve(params)
+    skin = None
+    skin_path = os.path.join(os.path.dirname(stl_path), "skin.npy")
+    if p.get("object") == "vase":
+        import numpy as np
+        skin = np.load(skin_path) if os.path.exists(skin_path) else generators.vessel_skin(p)
+    result = checks.run_checks(V, F, p, samples=samples, skin=skin)
     result["file"] = os.path.basename(stl_path)
     result["triangles"] = int(len(F))
     return result

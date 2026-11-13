@@ -1,7 +1,7 @@
 """Generatori parametrici: restituiscono mesh come array numpy (V: Nx3 mm, F: Mx3).
 
-Due famiglie:
-- "vessel": lampade e vasi. Si modella la PELLE esterna (griglia anelli x segmenti);
+Tre famiglie:
+- "vessel": lampade (`build_vessel`) e vasi (`build_vase`). Si modella la PELLE esterna (griglia anelli x segmenti);
   il solido stampabile si ricava dalla pelle con `build_shell` (spessore, fondo, foro).
 - "blob": solido chiuso con base piana, punto di partenza per la modellazione libera.
 """
@@ -21,11 +21,19 @@ DEFAULTS = {
     "wall": {"thickness": 1.6},
     "floor": {"thickness": 3.0},
     "fixture": {"hole_diameter": 40.0},
+    # sezione orizzontale: cerchio (sides = 0) oppure a `sides` lati, stile "soft" (lobi a
+    # coseno, depth = rientro a meta lato) o "polygon" (lati diritti, corner = raggio dei
+    # raccordi); twist_deg = rotazione dal basso all'alto, ease = partenza e arrivo dolci
+    "section": {"sides": 0, "style": "soft", "depth": 0.0, "corner": 0.15, "twist_deg": 0.0,
+                "ease": True},
     "mesh": {"segments": 0, "rings": 0, "edge": 1.6},
     "print": {"material": "PLA", "density_g_cm3": 1.24, "nozzle": 0.4, "layer": 0.2,
               "line_width": 0.45, "walls": 2, "infill": 0.15,
               "bed": [256.0, 256.0, 256.0], "overhang_limit_deg": 45.0,
-              "flow_mm3_s": 6.0, "filament_diameter": 1.75},
+              "flow_mm3_s": 6.0, "filament_diameter": 1.75,
+              # "walls": parete vera con perimetri; "spiral": modalita vaso degli slicer
+              # (una sola linea continua a spirale, si esporta il solido pieno)
+              "mode": "walls", "bottom_layers": 4},
     "constraints": {},
 }
 
@@ -101,12 +109,55 @@ def vessel_skin(params):
 
     uu, tt = np.meshgrid(u, theta, indexing="ij")
     wave = rib_wave(count * (tt + twist[:, None]), ribs.get("shape", "sine")) if count > 0 else 0.0
-    r = base_r[:, None] * (1.0 + amp[:, None] * wave)
+    r = base_r[:, None] * (1.0 + amp[:, None] * wave) * section_factor(u, theta, p["section"])
     skin = np.empty((nz, nt, 3))
     skin[..., 0] = r * np.cos(tt)
     skin[..., 1] = r * np.sin(tt)
     skin[..., 2] = (u * height)[:, None]
     return skin
+
+
+def section_factor(u, theta, sec):
+    """Fattore radiale della sezione orizzontale (1 = raggio del profilo).
+
+    style "soft": lati a coseno, 1 sugli spigoli e 1 - depth a meta dei lati (lobi morbidi).
+    style "polygon": poligono vero a lati diritti con spigoli raccordati; corner = raggio
+    del raccordo in frazione del raggio esterno (0 = spigolo vivo, 1 = cerchio).
+    La sezione ruota di twist_deg dal basso all'alto (con ease: partenza e arrivo dolci).
+    """
+    sides = int(sec.get("sides", 0))
+    style = sec.get("style", "soft")
+    if sides < 3 and not (style == "soft" and sides >= 2):
+        return 1.0
+    ramp = _smoothstep(u) if sec.get("ease", True) else np.asarray(u, dtype=float)
+    rot = math.radians(float(sec.get("twist_deg", 0.0))) * ramp
+    ang = theta[None, :] + rot[:, None]
+    if style == "polygon":
+        return rounded_polygon(ang, sides, float(sec.get("corner", 0.15)))
+    depth = float(sec.get("depth", 0.0))
+    if depth <= 0:
+        return np.ones_like(ang)
+    return 1.0 - depth * (1.0 - np.cos(sides * ang)) / 2.0
+
+
+def rounded_polygon(ang, sides, corner):
+    """Distanza dal centro del contorno di un poligono regolare raccordato, lungo la
+    direzione `ang` (spigolo a ang = 0). Il punto piu lontano vale 1."""
+    rc = min(max(corner, 0.0), 1.0)
+    half = math.pi / sides
+    cp = 1.0 - rc                                   # distanza dei centri dei raccordi
+    ap = cp * math.cos(half)                        # apotema del poligono interno
+    a = ap + rc                                     # apotema del poligono raccordato
+    # angolo dalla normale del lato piu vicino: spigoli a ang = 0, 2*half, ...; lati a ang = half
+    phi = np.asarray(ang) % (2 * half) - half
+    flat = a * np.abs(np.tan(phi)) <= ap * math.tan(half) + 1e-12
+    r_flat = a / np.cos(phi)
+    # tratto curvo: intersezione con la circonferenza di raggio rc centrata nello spigolo
+    cx, cy = cp * math.cos(half), cp * math.sin(half)
+    ux, uy = np.cos(np.abs(phi)), np.sin(np.abs(phi))
+    dot = ux * cx + uy * cy
+    r_arc = dot + np.sqrt(np.maximum(dot * dot - cp * cp + rc * rc, 0.0))
+    return np.where(flat, r_flat, r_arc)
 
 
 def grid_normals(skin):
@@ -333,3 +384,81 @@ def build_blob(params):
     V[:, 2] += full / 2.0 - sink * full
     V[:, 2] = np.maximum(V[:, 2], 0.0)
     return V, F
+
+
+# ---------------------------------------------------------------------- vasi
+def cap_skin(skin):
+    """Solido PIENO delimitato dalla pelle, chiuso sotto e sopra (per la modalita spirale:
+    lo slicer stampa solo il contorno esterno e i primi strati pieni del fondo)."""
+    skin = np.array(skin, dtype=float)
+    nz, nt = skin.shape[:2]
+    skin[0, :, 2] = 0.0
+    V = np.vstack([skin.reshape(-1, 3), [[0.0, 0.0, 0.0]], [[0.0, 0.0, float(skin[-1, 0, 2])]]])
+    cb, ct = nz * nt, nz * nt + 1
+    bottom = np.arange(nt)
+    top = (nz - 1) * nt + np.arange(nt)
+    F = np.concatenate([skin_faces(nz, nt),
+                        np.stack([np.full(nt, cb), np.roll(bottom, -1), bottom], 1),
+                        np.stack([np.full(nt, ct), top, np.roll(top, -1)], 1)])
+    return V, F.astype(np.int64)
+
+
+def polygon_area(ring):
+    x, y = ring[:, 0], ring[:, 1]
+    return 0.5 * float(np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def capacity_ml(skin, wall, floor):
+    """Capienza: volume d'acqua dal fondo interno al bordo (integrale delle aree interne)."""
+    nrm = grid_normals(skin)
+    inner = skin - wall * nrm
+    z = inner[:, :, 2].mean(axis=1)
+    areas = np.array([polygon_area(inner[j]) for j in range(len(inner))])
+    keep = z >= floor
+    if keep.sum() < 2:
+        return 0.0
+    zk, ak = z[keep], areas[keep]
+    k = int(np.argmax(keep))
+    if k > 0 and zk[0] > floor:                       # parte dalla quota esatta del fondo
+        t = (floor - z[k - 1]) / max(z[k] - z[k - 1], 1e-12)
+        zk = np.concatenate([[floor], zk])
+        ak = np.concatenate([[areas[k - 1] + (areas[k] - areas[k - 1]) * t], ak])
+    vol = float(np.sum((ak[1:] + ak[:-1]) / 2.0 * np.diff(zk)))
+    return vol / 1000.0
+
+
+def vase_params(params):
+    """Parametri del vaso: niente foro, fondo pieno, oggetto 'vase'."""
+    p = resolve(params)
+    p["object"] = "vase"
+    p["fixture"] = {"hole_diameter": 0.0}
+    return p
+
+
+def build_vase(params):
+    """Restituisce (skin, V, F). Pareti vere oppure solido pieno per la modalita spirale."""
+    p = vase_params(params)
+    skin = vessel_skin(p)
+    if p["print"].get("mode") == "spiral":
+        V, F = cap_skin(skin)
+    else:
+        V, F = build_shell(skin, wall=float(p["wall"]["thickness"]),
+                           floor=float(p["floor"]["thickness"]), hole_diameter=0.0)
+    return skin, V, F
+
+
+def build(params):
+    """Sceglie il generatore in base a params['object']."""
+    if (params or {}).get("object") == "vase":
+        return build_vase(params)
+    return build_vessel(params)
+
+
+def solid_from_skin(skin, params):
+    """Solido stampabile da una pelle (anche scolpita), coerente con il tipo di oggetto."""
+    p = resolve(params)
+    if p.get("object") == "vase":
+        p = vase_params(p)
+        if p["print"].get("mode") == "spiral":
+            return cap_skin(skin)
+    return shell_from_params(skin, p)

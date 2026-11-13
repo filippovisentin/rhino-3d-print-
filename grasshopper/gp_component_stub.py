@@ -29,7 +29,8 @@ if ricarica:
 _res = gp_gh.solve(dict(
     altezza=altezza, r0=r0, r1=r1, r2=r2, r3=r3, r4=r4, nervature=nervature, ampiezza=ampiezza,
     torsione=torsione, forma=forma, sfuma_basso=sfuma_basso, sfuma_alto=sfuma_alto, parete=parete,
-    fondo=fondo, foro=foro, diametro=diametro, peso_max=peso_max, limite=limite, risoluzione=risoluzione,
+    fondo=fondo, foro=foro, lati=lati, stile=stile, rientro=rientro, raccordo=raccordo, rot_sezione=rot_sezione, spirale=spirale, linea=linea,
+    capienza_min=capienza_min, diametro=diametro, peso_max=peso_max, limite=limite, risoluzione=risoluzione,
     verifica=verifica, strato=strato, esporta=esporta, file=file, editor=editor))
 
 pelle, solido, oltre, vicino = _res["pelle"], _res["solido"], _res["oltre"], _res["vicino"]

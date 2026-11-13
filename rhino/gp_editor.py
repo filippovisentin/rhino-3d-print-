@@ -222,7 +222,7 @@ class Session(object):
         if self.solid is None:
             if self.kind == "skin":
                 skin = self.V.reshape(self.grid[0], self.grid[1], 3)
-                self.solid = generators.shell_from_params(skin, self.params)
+                self.solid = generators.solid_from_skin(skin, self.params)
             else:
                 self.solid = (self.V, self.F)
         return self.solid
@@ -231,7 +231,8 @@ class Session(object):
         try:
             Vs, Fs = self.build_solid()
             rc = gp_rhino.raycast_rhino(gp_rhino.to_rhino_mesh(Vs, Fs))
-            self.result = checks.run_checks(Vs, Fs, self.params, raycast=rc, samples=samples)
+            skin = self.V.reshape(self.grid[0], self.grid[1], 3) if self.grid else None
+            self.result = checks.run_checks(Vs, Fs, self.params, raycast=rc, samples=samples, skin=skin)
             self.report = checks.format_report(self.result)
         except Exception as exc:
             self.result = None
@@ -643,7 +644,7 @@ def new_blob(doc, radius=40.0, height=90.0, subdivisions=5):
 
 def new_vessel(doc, params=None):
     params = params or {"ribs": {"count": 0, "amplitude": 0.0, "twist_deg": 0.0}, "mesh": {"segments": 180}}
-    skin, V, F = generators.build_vessel(params)
+    skin, V, F = generators.build(params)
     gp_rhino.remove_named(doc, "gp_")
     nz, nt = skin.shape[:2]
     meta = {"kind": "skin", "rings": int(nz), "segments": int(nt), "params": params}

@@ -1,0 +1,13 @@
+{
+  "object": "vase",
+  "envelope": {"height": 200.0},
+  "profile": {"radii": [45.0, 62.0, 70.0, 60.0, 48.0]},
+  "ribs": {"count": 0, "amplitude": 0.0, "twist_deg": 0.0},
+  "section": {"sides": 6, "depth": 0.15, "twist_deg": 120.0, "ease": true},
+  "wall": {"thickness": 1.2},
+  "floor": {"thickness": 1.2},
+  "fixture": {"hole_diameter": 0.0},
+  "mesh": {"segments": 240, "edge": 1.6},
+  "print": {"mode": "spiral", "line_width": 0.45, "bottom_layers": 4},
+  "constraints": {"max_mass_g": 100.0, "min_capacity_ml": 1500.0}
+}
