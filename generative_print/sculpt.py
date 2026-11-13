@@ -91,3 +91,54 @@ def constrain(V, base_ring=None, floor_z=0.0):
     np.maximum(V[:, 2], floor_z, out=V[:, 2])
     if base_ring is not None:
         V[base_ring, 2] = floor_z
+
+
+def relax_overhang(skin, solid_fn, limit_deg, target_margin=0.3, strength=0.5, grow=2, max_iter=60):
+    """Correzione automatica degli sbalzi: liscia la pelle solo dove il solido supera il limite.
+
+    skin: griglia (anelli, segmenti, 3). solid_fn(skin) -> (V, F) del solido (guscio compreso, cosi
+    contano anche le facce interne). Le facce oltre limit_deg - target_margin vengono riportate al
+    punto della pelle piu vicino; la zona si allarga di 'grow' passi di griglia e lì ogni punto si
+    avvicina alla media dei quattro vicini, solo in orizzontale (le quote restano fisse). Il primo e
+    l'ultimo anello non si toccano. Si ripete finche il massimo rientra o si esaurisce max_iter.
+    Restituisce (pelle corretta, registro delle passate).
+    """
+    from .checks import overhang_angles
+    skin = np.array(skin, dtype=float)
+    nz, nt = skin.shape[:2]
+    flat = skin.reshape(-1, 3)
+    target = float(limit_deg) - float(target_margin)
+    log = []
+    for it in range(max_iter + 1):
+        V, F = solid_fn(skin)
+        ang, areas, bed = overhang_angles(V, F)
+        free = ~bed & (areas > 1e-9)
+        bad = free & (ang > target)
+        log.append({"pass": it, "max_deg": round(float(ang[free].max()), 2),
+                    "faces_over": int(bad.sum()), "area_over_mm2": round(float(areas[bad].sum()), 1)})
+        if not bad.any() or it == max_iter:
+            break
+        C = V[F[bad]].mean(axis=1)
+        # punto della pelle piu vicino a ogni faccia oltre il limite (solo anelli vicini in z)
+        mask = np.zeros((nz, nt), dtype=bool)
+        zr = skin[:, :, 2].mean(axis=1)
+        for c in C:
+            r0 = int(np.clip(np.searchsorted(zr, c[2]), 0, nz - 1))
+            lo, hi = max(0, r0 - 3), min(nz, r0 + 4)
+            d = np.linalg.norm(skin[lo:hi] - c, axis=2)
+            k = np.unravel_index(np.argmin(d), d.shape)
+            mask[lo + k[0], k[1]] = True
+        for _ in range(grow):                                   # allarga la zona sulla griglia
+            m = mask.copy()
+            m[1:] |= mask[:-1]
+            m[:-1] |= mask[1:]
+            m |= np.roll(mask, 1, axis=1) | np.roll(mask, -1, axis=1)
+            mask = m
+        mask[0] = False
+        mask[-1] = False
+        avg = 0.25 * (np.roll(skin, 1, axis=1) + np.roll(skin, -1, axis=1)
+                      + np.vstack([skin[:1], skin[:-1]]) + np.vstack([skin[1:], skin[-1:]]))
+        new = skin.copy()
+        new[mask, :2] += strength * (avg[mask, :2] - skin[mask, :2])
+        skin = new
+    return skin, log

@@ -69,7 +69,7 @@ def params_from_inputs(i):
                     "corner": _num(i.get("raccordo"), 0.12),
                     "twist_deg": _num(i.get("rot_sezione"), 0.0), "ease": True},
         "mesh": {"edge": max(0.8, _num(i.get("risoluzione"), 2.5))},
-        "print": {"overhang_limit_deg": _num(i.get("limite"), 45.0),
+        "print": {"overhang_limit_deg": _num(i.get("limite"), 43.0),
                   "mode": "spiral" if (i.get("spirale") and hole <= 0) else "walls",
                   "line_width": _num(i.get("linea"), 0.45)},
         "constraints": cons,

@@ -69,7 +69,7 @@ def build(repo, save=True):
         ("linea", "Larghezza linea (mm)", 0.4, 0.45, 1.0, 2),
         ("diametro", "Diametro obiettivo (mm, 0 = libero)", 0, 180, 250, 0),
         ("peso_max", "Peso massimo (g)", 50, 250, 600, 0),
-        ("limite", "Sbalzo limite (gradi)", 30, 45, 70, 0),
+        ("limite", "Sbalzo limite (gradi)", 30, 43, 70, 0),
         ("risoluzione", "Lato maglia (mm)", 1.0, 2.5, 5.0, 1),
         ("strato", "Anteprima strato (0 = spenta)", 0, 0, 1500, -1),
     ]

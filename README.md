@@ -17,7 +17,7 @@ Generative design per la stampa 3D dentro Rhino 8: un agente AI genera lampade e
 ## Demo
 
 **Lampada.** Brief: *lampada da tavolo, diffusore a nervature torte, Ø 18 cm, PLA senza supporti, max 250 g.*
-Otto iterazioni: cinque parametriche e tre di modellazione plastica. Oggetto finale: 226,0 g, sbalzo massimo 44,5°, spessore 1,27 mm, Ø 181,7 mm. File in [`runs/2026-11-13_lampada-nervature/final/`](runs/2026-11-13_lampada-nervature/final/) (STL, 3MF, scheda); [diario](runs/2026-11-13_lampada-nervature/journal.html).
+Nove iterazioni: cinque parametriche, tre di modellazione plastica e una di correzione automatica degli sbalzi (limite portato a 43° dopo il confronto con lo slicer). Oggetto finale: 225,8 g, sbalzo massimo 42,7°, spessore 1,27 mm, Ø 181,7 mm. File in [`runs/2026-11-13_lampada-nervature/final/`](runs/2026-11-13_lampada-nervature/final/) (STL, 3MF, scheda); [diario](runs/2026-11-13_lampada-nervature/journal.html).
 
 **Vaso.** Brief: *vaso per fiori secchi a sezione esagonale torta, alto 20 cm, almeno 1,5 litri, PLA in modalità spirale, senza supporti, max 100 g.*
 Tre iterazioni. Nella seconda la vista dall'alto ha mostrato che la sezione "morbida" non può avere lati diritti: il generatore è stato esteso con il poligono raccordato. Oggetto finale: 65,1 g, sbalzo massimo 36,4°, capienza 1725 ml, un solo contorno a ogni mm di altezza. File in [`runs/2026-11-13_vaso-esagonale/final/`](runs/2026-11-13_vaso-esagonale/final/); [diario](runs/2026-11-13_vaso-esagonale/journal.html).

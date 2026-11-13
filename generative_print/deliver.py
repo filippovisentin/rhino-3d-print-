@@ -117,9 +117,9 @@ def deliver(run_dir, n, name):
         if os.path.exists(sup):
             with open(sup, encoding="utf-8") as fh:
                 s45 = json.load(fh)
-            L.append("- Con i supporti automatici a soglia 45 gradi lo slicer genera %s m di supporto "
-                     "(con la soglia predefinita del profilo, 30 gradi dall'orizzontale, nessuno)."
-                     % it(round(s45.get("support_m", 0.0), 1)))
+            n45 = float(s45.get("support_m", 0.0))
+            L.append("- Con i supporti automatici attivi a soglia 45 gradi lo slicer %s."
+                     % ("non genera supporti" if n45 == 0 else "genera %s m di supporto" % it(round(n45, 1))))
     L += ["", "## Non verificato",
           "L'oggetto non è stato stampato. La densità del PLA (%s g/cm3) è un valore ipotizzato; "
           "lo slicer usa quella del suo profilo." % it(p["print"]["density_g_cm3"])]

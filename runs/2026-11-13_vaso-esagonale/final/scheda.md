@@ -20,7 +20,7 @@ Oggetto finale della corsa `2026-11-13_vaso-esagonale` (iterazione 3). Unità: m
 | Controllo | Misura | Limite | Esito |
 |---|---|---|---|
 | Mesh chiusa | 0 spigoli aperti | 0 | ok |
-| Sbalzo massimo | 36,4 gradi | <= 45 | ok |
+| Sbalzo massimo | 36,4 gradi | <= 43 | ok |
 | Isole (partenze nel vuoto) | 0 punti | 0 | ok |
 | Ingombro | 125,5 x 127,9 x 200 mm | <= 256 x 256 x 256 | ok |
 | Appoggio sul piano | 5209 mm2 | >= 100 | ok |
@@ -50,7 +50,7 @@ Affettato da riga di comando con `python -m generative_print.bambu` (ricetta qui
 - Stampante Bambu Lab X1 Carbon 0.4 nozzle, Bambu Studio da riga di comando.
 - Peso 60.7 g (densita del profilo 1.26 g/cm3), 20.0 m di filo, 1001 strati, tempo 1h 15m 8s.
 - Gap infill: 0.0 m.
-- Sbalzo del muro esterno strato per strato (uno strato ogni 2, 499 controllati): sul 99% dei punti di ogni strato al massimo 36.5 gradi, 0 strati oltre il limite; picco assoluto 49.9 gradi a z 70.2 mm, 4 strati con almeno un punto oltre il limite; mediana 27.1 gradi.
+- Sbalzo del muro esterno strato per strato (uno strato ogni 2, 499 controllati): sul 99% dei punti di ogni strato al massimo 36.5 gradi, 0 strati oltre il limite; picco assoluto 49.9 gradi a z 70.2 mm, 6 strati con almeno un punto oltre il limite; mediana 27.1 gradi.
 - Spirale tra z 1.2 e 199.8 mm: 138072 tratti, 0 spostamenti a vuoto, 0 ritrazioni, 0 discese di z: continua.
 - Volume di materiale: nostra stima 49,5 cm3, slicer 48,2 cm3 (+2.7%).
 - Tempo: nostra stima grossolana 2,3 h, slicer 1,3 h.

@@ -272,3 +272,29 @@ def sculpt_step(doc, run_dir, n, session, note=""):
     V, F = generators.solid_from_skin(skin, params)
     _capture(doc.Views.ActiveView, os.path.join(iter_dir, "views", "editor.png"))   # mappa degli sbalzi
     return iter_dir, params, skin, V, F
+
+
+def relax_step(doc, run_dir, n, limit_deg=None, note="", capture=True):
+    """Iterazione n: pelle dell'iterazione n-1 corretta con sculpt.relax_overhang (lisciatura
+    automatica solo dove il solido supera il limite di sbalzo), poi viste e verifica esterna."""
+    from generative_print import sculpt
+    prev = os.path.join(run_dir, "iter_%02d" % (n - 1))
+    iter_dir = os.path.join(run_dir, "iter_%02d" % n)
+    os.makedirs(os.path.join(iter_dir, "views"), exist_ok=True)
+    with open(os.path.join(prev, "params.json"), encoding="utf-8") as fh:
+        params = json.load(fh)
+    if limit_deg is not None:
+        params.setdefault("print", {})["overhang_limit_deg"] = float(limit_deg)
+    p = generators.resolve(params)
+    lim = float(p["print"]["overhang_limit_deg"])
+    skin0 = np.load(os.path.join(prev, "skin.npy"))
+    skin, log = sculpt.relax_overhang(skin0, lambda s: generators.solid_from_skin(s, p), lim)
+    moved = np.linalg.norm(skin - skin0, axis=2)
+    params["relax_overhang"] = {"note": note, "limit_deg": lim, "passes": log,
+                                "points_moved": int((moved > 1e-9).sum()), "points_total": int(moved.size),
+                                "max_move_mm": round(float(moved.max()), 3)}
+    with open(os.path.join(iter_dir, "params.json"), "w", encoding="utf-8") as fh:
+        json.dump(params, fh, indent=2, ensure_ascii=False)
+    V, F = generators.solid_from_skin(skin, p)
+    show_solid(doc, iter_dir, params, skin, V, F, capture=capture)
+    return external_verify(iter_dir), params["relax_overhang"]

@@ -1,0 +1,27 @@
+{
+  "title": "Margine sullo sbalzo: limite di progetto 43 gradi",
+  "changes": [
+    {
+      "param": "limite di sbalzo",
+      "from": "45 gradi",
+      "to": "43 gradi",
+      "why": "in Bambu Studio, con i supporti automatici a soglia 45 gradi, l'iterazione 8 (44,5 gradi) prendeva 35 m di supporto"
+    },
+    {
+      "param": "correzione automatica degli sbalzi",
+      "from": "—",
+      "to": "5 passate, 1140 punti su 26688, spostamento massimo 0,61 mm in orizzontale",
+      "why": "lisciare solo dove il solido supera il nuovo limite, senza cambiare la forma"
+    }
+  ],
+  "reasoning": "Iterazione oltre il massimo di 8 previsto dal brief, aggiunta dopo il confronto con lo slicer su decisione dell'utente (limite 43 gradi, 2 gradi di margine). Le facce oltre 43 gradi erano tre zone: la svasatura esterna a z 30 mm, l'interno delle costole scolpite a z 140 mm e una piccola zona a z 190 mm, 298 mm2 in tutto. Verifica indipendente sull'STL: sbalzo massimo 42,7 gradi; peso 225,8 g, spessore 1,27 mm, diametro 181,7 mm, foro E27 40,5 mm invariati.",
+  "critique": {
+    "proportions": 8.5,
+    "rhythm": 8.5,
+    "brief_fit": 8.5,
+    "silhouette": 8.5,
+    "score": 8.5,
+    "text": "Nelle viste la differenza con l'iterazione 8 non si vede: gli spostamenti restano sotto 0,61 mm. Le quattro onde del bordo e la torsione delle costole sono intatte."
+  },
+  "decision": "Vincoli soddisfatti con 2 gradi di margine sullo sbalzo e voto invariato: questo diventa l'oggetto finale al posto dell'iterazione 8."
+}

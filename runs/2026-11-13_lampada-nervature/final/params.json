@@ -48,7 +48,7 @@
       256.0,
       256.0
     ],
-    "overhang_limit_deg": 45.0,
+    "overhang_limit_deg": 43.0,
     "flow_mm3_s": 6.0,
     "filament_diameter": 1.75
   },
@@ -67,5 +67,50 @@
       "min_clearance": 20.0,
       "min_top_opening": 50.0
     }
+  },
+  "relax_overhang": {
+    "note": "Lisciatura automatica dove il solido supera 43 gradi (limite di progetto con 2 gradi di margine, dopo il confronto con Bambu Studio)",
+    "limit_deg": 43.0,
+    "passes": [
+      {
+        "pass": 0,
+        "max_deg": 44.52,
+        "faces_over": 104,
+        "area_over_mm2": 298.2
+      },
+      {
+        "pass": 1,
+        "max_deg": 44.97,
+        "faces_over": 72,
+        "area_over_mm2": 204.0
+      },
+      {
+        "pass": 2,
+        "max_deg": 44.07,
+        "faces_over": 36,
+        "area_over_mm2": 113.9
+      },
+      {
+        "pass": 3,
+        "max_deg": 43.92,
+        "faces_over": 16,
+        "area_over_mm2": 51.2
+      },
+      {
+        "pass": 4,
+        "max_deg": 42.84,
+        "faces_over": 16,
+        "area_over_mm2": 52.3
+      },
+      {
+        "pass": 5,
+        "max_deg": 42.69,
+        "faces_over": 0,
+        "area_over_mm2": 0.0
+      }
+    ],
+    "points_moved": 1140,
+    "points_total": 26688,
+    "max_move_mm": 0.607
   }
 }

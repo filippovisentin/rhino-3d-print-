@@ -8,7 +8,8 @@ Strumento open source (MIT) di generative design per la stampa 3D FDM dentro Rhi
 - 2026-11-13: definizione Grasshopper `grasshopper/generative_print.gh` con 20 slider, mappa degli sbalzi, strati, verifica, esportazione e invio all'editor; provata anche riaprendola da zero.
 - 2026-11-13: generatore del vaso (sezione a lobi o poligono raccordato con rotazione, capienza, modalità spirale con controllo dei contorni), corsa `runs/2026-11-13_vaso-esagonale` (3 iterazioni), modulo `deliver`, vaso in Grasshopper. 31 test.
 - 2026-11-13: confronto con uno slicer vero. `generative_print/bambu.py` affetta con Bambu Studio da riga di comando (profilo X1 Carbon 0.4) e analizza il G-code: peso, tempo, supporti, gap infill, sbalzo strato per strato, continuità della spirale. Risultati in `runs/*/final/slicer_bambu*.json` e nelle schede. 37 test.
-- Da fare: prova di stampa reale; decidere il margine sullo sbalzo (la lampada a 44,5° prende supporti se la soglia è esattamente 45°); aggiornare PIANO.md (descrive il piano iniziale, superato in più punti).
+- 2026-11-13: limite di progetto sullo sbalzo portato a 43° (2° di margine), deciso dall'utente dopo che Bambu, a soglia 45°, metteva supporti alla lampada da 44,5°. Nuova correzione automatica `sculpt.relax_overhang` (lisciatura solo dove si supera il limite); lampada iterazione 9 = nuovo finale, 42,7°.
+- Da fare: prova di stampa reale; aggiornare PIANO.md (descrive il piano iniziale, superato in più punti).
 
 ## Decisioni e vincoli
 - Rhino si pilota con il server MCP McNeel (Rhino-MCP-Platform 0.4.0). Si avvia con `Rhino.exe /nosplash /runscript="_MCPStart"`: l'avvio automatico del router fallisce.
@@ -16,7 +17,7 @@ Strumento open source (MIT) di generative design per la stampa 3D FDM dentro Rhi
 - Lampade e vasi si modellano come PELLE esterna (griglia anelli x segmenti); il solido si ricostruisce con `build_shell`. Le forme libere sono solidi chiusi.
 - Le misure ufficiali si fanno fuori da Rhino sull'STL esportato. Diametro = cerchio circoscritto.
 - Vaso in spirale: si esporta il solido PIENO (lo svuota lo slicer); le viste mostrano invece il pezzo stampato (parete di una linea). Le catture attendono il ridisegno (`_settle`), altrimenti escono con i fili della maglia.
-- Unità mm. PLA 1,24 g/cm³ (ipotesi). Sbalzo limite 45°. Solo lampadine LED.
+- Unità mm. PLA 1,24 g/cm³ (ipotesi). Sbalzo limite di progetto 43° (la regola fisica è 45°: 2° di margine perché lo slicer non metta supporti). Solo lampadine LED.
 - La definizione .gh si costruisce da script (`grasshopper/build_definition.py`), non a mano; il componente Python 3 contiene solo un aggancio a `rhino/gp_gh.py`. In Rhino 8 `SetParametersFromScript` non crea ingressi: si registrano con `CreateParameter`.
 - Gli script lanciati via MCP devono rimettere ogni volta la cartella del progetto in `sys.path`.
 - Niente misure o test dichiarati senza averli eseguiti.

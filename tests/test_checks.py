@@ -163,3 +163,26 @@ def test_brush_moves_only_inside_radius_and_respects_bed():
     sculpt.dab(V, n, sculpt.edge_list(F), low, 10.0, 5.0, "draw", direction=[0, 0, -1])
     sculpt.constrain(V)
     assert V[:, 2].min() >= 0.0
+
+
+def test_relax_overhang_removes_local_bulge_only():
+    """Un rigonfiamento locale su un cilindro crea uno sbalzo oltre 43 gradi: la correzione lo
+    riporta sotto il limite muovendo solo i punti vicini, e il resto della pelle non cambia."""
+    from generative_print import generators, sculpt
+    p = generators.resolve({"object": "vase", "envelope": {"height": 60.0}, "profile": {"radii": [30.0, 30.0]},
+                            "ribs": {"count": 0, "amplitude": 0.0}, "mesh": {"segments": 120, "edge": 1.0},
+                            "wall": {"thickness": 2.0}, "floor": {"thickness": 2.0}})
+    skin = generators.vessel_skin(p)
+    z = skin[:, :, 2]
+    ang = np.arctan2(skin[:, :, 1], skin[:, :, 0])
+    bump = 4.0 * np.exp(-((z - 30.0) / 2.5) ** 2) * np.exp(-(ang / 0.25) ** 2)   # sporgenza ripida
+    r = np.hypot(skin[:, :, 0], skin[:, :, 1]) + bump
+    skin[:, :, 0], skin[:, :, 1] = r * np.cos(ang), r * np.sin(ang)
+    solid = lambda s: generators.solid_from_skin(s, p)
+    before = checks.overhang(*solid(skin), 43.0)["max_deg"]
+    new, log = sculpt.relax_overhang(skin, solid, 43.0)
+    after = checks.overhang(*solid(new), 43.0)["max_deg"]
+    assert before > 45.0 and after <= 43.0
+    moved = np.linalg.norm(new - skin, axis=2) > 1e-9
+    assert moved.sum() < 0.1 * moved.size                 # solo la zona del rigonfiamento
+    assert np.allclose(new[:, :, 2], skin[:, :, 2])        # le quote non cambiano

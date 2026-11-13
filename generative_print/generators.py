@@ -29,7 +29,7 @@ DEFAULTS = {
     "mesh": {"segments": 0, "rings": 0, "edge": 1.6},
     "print": {"material": "PLA", "density_g_cm3": 1.24, "nozzle": 0.4, "layer": 0.2,
               "line_width": 0.45, "walls": 2, "infill": 0.15,
-              "bed": [256.0, 256.0, 256.0], "overhang_limit_deg": 45.0,
+              "bed": [256.0, 256.0, 256.0], "overhang_limit_deg": 43.0,
               "flow_mm3_s": 6.0, "filament_diameter": 1.75,
               # "walls": parete vera con perimetri; "spiral": modalita vaso degli slicer
               # (una sola linea continua a spirale, si esporta il solido pieno)

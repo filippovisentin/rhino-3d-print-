@@ -87,7 +87,7 @@ def overhang_angles(V, F):
     return ang, areas, on_bed
 
 
-def overhang(V, F, limit_deg=45.0):
+def overhang(V, F, limit_deg=43.0):
     ang, areas, on_bed = overhang_angles(V, F)
     free = ~on_bed & (areas > 1e-9)
     over = free & (ang > limit_deg + ANGLE_TOL)
