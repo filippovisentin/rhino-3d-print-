@@ -33,8 +33,9 @@ for _p in (REPO, os.path.join(REPO, "rhino")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import gp_panel  # noqa: E402
 import gp_rhino  # noqa: E402
-from generative_print import bambu, checks, mesh_io, printcheck, slicer  # noqa: E402
+from generative_print import bambu, checks, mesh_io, printcheck, slicer, supports  # noqa: E402
 
 STICKY = "generative_print_slicer"
 MATERIALS = [("PLA", 1.24), ("PETG", 1.27), ("ABS", 1.04), ("ASA", 1.07), ("TPU", 1.21)]
@@ -42,6 +43,10 @@ PRINTABLE = (rg.Mesh, rg.Brep, rg.Extrusion, rg.SubD, rg.Surface)
 CLAY = (214, 208, 198)
 WALL_COLORS = [(235, 95, 25), (245, 170, 40), (250, 205, 90)]      # esterna, interne
 INFILL_COLOR = (60, 140, 215)
+SUPPORT_COLOR = (40, 160, 90)
+SUPPORT_FACE_COLOR = (20, 110, 60)
+SUPPORT_TYPES = [(None, "Nessuno"), ("grid", "Normali a griglia"), ("snug", "Normali aderenti"),
+                 ("tree", "Ad albero")]
 
 
 def int_array(values):
@@ -140,7 +145,10 @@ class Job(object):
         self.face_sets = None
         self.layer_faces = None
         self.ray_mesh = None
-        self.columns = None       # supporti in anteprima: x, y, z alto, z basso (pezzo appoggiato al piano)
+        self.support = None       # supporti generati (generative_print.supports), pezzo appoggiato al piano
+        self.sup_mesh = None      # rami dell'albero, mesh di Rhino con i segmenti ordinati per quota
+        self.sup_faces = None
+        self.sup_lines, self.sup_base, self.sup_face, self.sup_circles = [], [], [], []
         self.walls = []           # (indice di parete, rg.Polyline)
         self.infill = []          # rg.Line
         self.open_loops = []      # rg.Polyline non chiuse: mesh aperta a quella quota
@@ -172,12 +180,18 @@ class Conduit(Rhino.Display.DisplayConduit):
                                   rg.Interval(-bed[1] / 2.0, bed[1] / 2.0))
             col = sd.Color.FromArgb(90, 110, 150) if fits else sd.Color.FromArgb(215, 45, 40)
             e.Display.DrawPolyline(rect.ToPolyline(), col, 2)
-            if j.columns is not None:                    # supporti: fino allo strato corrente, o interi
-                top = (sl.layer_index + 1) * float(sl.settings["layer"]) if sl.layer_on else float("inf")
-                lines = [rg.Line(rg.Point3d(x, y, j.z0 + zb), rg.Point3d(x, y, j.z0 + min(zt, top)))
-                         for x, y, zt, zb in j.columns.tolist() if zb < top]
-                if lines:
-                    e.Display.DrawLines(lines, sd.Color.FromArgb(40, 160, 90), 2)
+            if j.support is not None:
+                green = sd.Color.FromArgb(*SUPPORT_COLOR)
+                if j.sup_mesh is not None and j.sup_faces is not None and j.sup_faces.Length:
+                    e.Display.DrawMeshShaded(j.sup_mesh, sl.mat_sup, j.sup_faces)
+                if j.sup_lines:
+                    e.Display.DrawLines(j.sup_lines, green, 1)
+                if j.sup_base:
+                    e.Display.DrawLines(j.sup_base, green, 2)
+                if j.sup_face:
+                    e.Display.DrawLines(j.sup_face, sd.Color.FromArgb(*SUPPORT_FACE_COLOR), 2)
+                for c in j.sup_circles:
+                    e.Display.DrawCircle(c, green, 2)
             if sl.layer_on:
                 if j.layer_faces is not None and j.layer_faces.Length:
                     e.Display.DrawMeshShaded(j.show, sl.mat, j.layer_faces)
@@ -223,6 +237,8 @@ class Slicer(object):
             m.BackDiffuse = m.Diffuse
             return m
         self.mat, self.mat_warn, self.mat_over = mat(CLAY), mat((240, 175, 50)), mat((215, 45, 40))
+        self.mat_sup = mat(SUPPORT_COLOR)
+        self.docked = False
 
     def fail(self):
         self.error = traceback.format_exc()
@@ -264,7 +280,10 @@ class Slicer(object):
             j.doc.Views.Redraw()
         if close_form and self.form is not None:
             form, self.form = self.form, None
-            form.Close()
+            if self.docked:
+                gp_panel.undock("slicer")
+            else:
+                form.Close()
 
     # ----------------------------------------------------------- calcolo
     def set(self, **over):
@@ -283,20 +302,16 @@ class Slicer(object):
         if j is None:
             self.refresh()
             return None
-        rc = None
-        if self.settings["supports"]:
-            if j.ray_mesh is None:                       # mesh appoggiata al piano, per i raggi dei supporti
-                j.ray_mesh = gp_rhino.to_rhino_mesh(j.Vw, j.F)
-            rc = gp_rhino.raycast_rhino(j.ray_mesh)
-        res = printcheck.analyse(j.Vw, j.F, self.settings, raycast=rc)
-        cols = res.get("support_columns")
-        j.columns = cols if cols is not None and len(cols) else None
+        res = printcheck.analyse(j.Vw, j.F, self.settings)
+        j.support, j.sup_mesh = res.get("support"), None
         over, warn = res["over_mask"], res["warn_mask"]
         j.face_sets = (int_array(np.where(~over & ~warn)[0]), int_array(np.where(warn)[0]),
                        int_array(np.where(over)[0]))
         self.result = res
         if self.layer_on:
             self.set_layer(self.layer_index)
+        else:
+            self._support_draw()
         self.refresh()
         j.doc.Views.Redraw()
         return res
@@ -329,6 +344,7 @@ class Slicer(object):
                         for a, b in seg.tolist()]
             fill_len = float(np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1).sum()) if len(seg) else 0.0
         wall_len = sum(pl.Length for _, pl in walls)
+        self._support_draw()
         self.layer_text = ("Strato %d / %d   z = %.2f mm   contorni %d   pareti %.0f mm   %s %.0f mm%s"
                            % (index + 1, n, zw, len(closed), wall_len,
                               "strato pieno" if solid else "riempimento", fill_len,
@@ -337,6 +353,42 @@ class Slicer(object):
         j.doc.Views.Redraw()
         return {"index": index, "layers": n, "z": zw, "loops": len(closed), "walls": len(walls),
                 "wall_mm": wall_len, "infill_mm": fill_len, "solid": solid, "open": len(j.open_loops)}
+
+    def _support_draw(self):
+        """Prepara cio che la vista disegna dei supporti: tutto, oppure fino allo strato corrente
+        (con i tratti di quello strato: linee di base, interfaccia, sezioni dei rami)."""
+        j = self.job
+        j.sup_lines, j.sup_base, j.sup_face, j.sup_circles, j.sup_faces = [], [], [], [], None
+        sp = j.support
+        if sp is None or len(sp["columns"]) == 0:
+            j.sup_mesh = None
+            return
+        h, z0 = float(self.settings["layer"]), j.z0
+        top = (self.layer_index + 1) * h if self.layer_on else float("inf")
+        zw = min((self.layer_index + 0.5) * h, j.height - 1e-3)
+        if sp["type"] == "tree":
+            if j.sup_mesh is None:
+                segs = sp["segments"][np.argsort(sp["segments"][:, 2], kind="stable")]
+                Vt, Ft = supports.tree_mesh(segs)
+                j.sup_mesh = gp_rhino.to_rhino_mesh(Vt + [0.0, 0.0, z0], Ft)
+                j.sup_mesh.Normals.ComputeNormals()
+                j.sup_ztop = segs[:, 2]
+            n = int(np.searchsorted(j.sup_ztop, top, side="right"))
+            j.sup_faces = int_array(np.arange(n * 16))
+            if self.layer_on:
+                for x, y, r in supports.tree_sections(sp["segments"], zw).tolist():
+                    j.sup_circles.append(rg.Circle(rg.Plane(rg.Point3d(x, y, z0 + zw), rg.Vector3d.ZAxis), r))
+            return
+        cols, ij = sp["columns"], sp["cells"]
+        k = max(1, int(round(2.5 / sp["res"])))
+        m = (ij[:, 0] % k == 0) & (ij[:, 1] % k == 0) & (cols[:, 3] < top)
+        j.sup_lines = [rg.Line(rg.Point3d(x, y, z0 + zb), rg.Point3d(x, y, z0 + min(zt, top)))
+                       for x, y, zt, zb in cols[m].tolist()]
+        if self.layer_on:
+            base, face = supports.layer_pattern(sp, zw, h)
+            for seg, store in ((base, j.sup_base), (face, j.sup_face)):
+                for a, b in seg.tolist():
+                    store.append(rg.Line(rg.Point3d(a[0], a[1], z0 + zw), rg.Point3d(b[0], b[1], z0 + zw)))
 
     def _walls(self, closed, plane, lw, count, tol=0.01):
         """Pareti di uno strato: contorni spostati verso il materiale di mezza linea, una linea e mezza...
@@ -499,7 +551,8 @@ class Slicer(object):
             os.remove(self.bambu_json)
         cmd = [exe, "-m", "generative_print.bambu", stl, pjson, "--printer", self.printer,
                "--out", os.path.join(out, "bambu"), "--no-analysis", "--material", self.material_name] \
-            + (["--support"] if s["supports"] else [])
+            + (["--support", "--support-type", s["support_type"]] if s["supports"] else []) \
+            + (["--support-bed-only"] if s["supports"] and s["support_bed_only"] else [])
         env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
         self.proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, creationflags=0x08000000)
@@ -611,28 +664,35 @@ class Slicer(object):
             self.error = traceback.format_exc()
             self.refresh()
 
-    def show_panel(self):
+    def show_panel(self, dock=True):
+        """Apre i controlli: come scheda agganciata accanto ai Livelli (dock=True) o come finestra."""
         import Eto.Forms as ef
         import Eto.Drawing as ed
         if self.form is not None:
-            self.form.BringToFront()
+            if self.docked:
+                gp_panel.dock("slicer", self.form, self.on_form_closed)
+            else:
+                self.form.BringToFront()
             self.refresh()
             return
         self.loading = True
-        form = ef.Form()
-        form.Title = "Generative Print - slicer"
-        form.Padding = ed.Padding(10)
-        form.Resizable = True
-        form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
 
         def label(text):
             lb = ef.Label()
             lb.Text = text
+            lb.VerticalAlignment = ef.VerticalAlignment.Center
             return lb
 
-        def button(text, handler):
+        def title(text):
+            lb = label(text)
+            lb.Font = ed.SystemFonts.Bold()
+            return lb
+
+        def button(text, handler, tip=None):
             b = ef.Button()
             b.Text = text
+            if tip:
+                b.ToolTip = tip
             b.Click += lambda s, e: self.guard(handler)
             return b
 
@@ -658,9 +718,17 @@ class Slicer(object):
             w.CheckedChanged += lambda s, e: self.guard(handler)
             return w
 
+        def table(rows, spacing=(6, 5)):
+            lay = ef.DynamicLayout()
+            lay.Spacing = ed.Size(*spacing)
+            for row in rows:
+                lay.AddRow(*row)
+            return lay
+
         s = self.settings
         self.printers = list(bambu.PRINTERS)
         self.w_obj = ef.Label()
+        self.w_obj.Wrap = ef.WrapMode.Word
         self.w_printer = dropdown(self.printers, self.printer)
         self.w_material = dropdown([m for m, _ in MATERIALS], self.material_name)
         self.w_h = stepper(0.08, 0.4, s["layer"], 0.04, 2)
@@ -670,63 +738,95 @@ class Slicer(object):
         self.w_top = stepper(0, 20, s["top_layers"], 1, 0)
         self.w_bottom = stepper(0, 20, s["bottom_layers"], 1, 0)
         self.w_limit = stepper(30, 70, s["overhang_limit_deg"], 1, 0)
-        self.w_sup = check("Supporti", bool(s["supports"]), self.on_settings)
-        self.w_heat = check("Mappa degli sbalzi (arancio = vicino alla soglia, rosso = oltre)", self.heat, self.on_view)
+        kinds = [text for _, text in SUPPORT_TYPES]
+        self.w_sup = dropdown(kinds, dict(SUPPORT_TYPES)[s["support_type"]] if s["supports"] else kinds[0])
+        self.w_bed = check("Supporti solo dal piano", bool(s["support_bed_only"]), self.on_settings)
+        self.w_heat = check("Mappa degli sbalzi", self.heat, self.on_view)
+        self.w_heat.ToolTip = "Arancio = vicino alla soglia, rosso = oltre"
         self.w_layers = check("Strati", self.layer_on, self.on_view)
         self.w_layer = ef.Slider()
         self.w_layer.MinValue, self.w_layer.MaxValue, self.w_layer.Value = 0, 100, 0
-        self.w_layer.Width = 420
         self.w_layer.ValueChanged += lambda s_, e: self.guard(self.on_view)
         self.w_layer_info = ef.Label()
+        self.w_layer_info.Wrap = ef.WrapMode.Word
         self.w_report = ef.TextArea()
         self.w_report.ReadOnly = True
         self.w_report.Font = ed.Font("Consolas", 8.5)
-        self.w_report.Wrap = False
-        self.w_report.Size = ed.Size(660, 300)
+        self.w_report.Wrap = True
+        self.w_report.Height = 300
 
         lay = ef.DynamicLayout()
-        lay.Spacing = ed.Size(6, 6)
-        top = ef.DynamicLayout()
-        top.Spacing = ed.Size(6, 6)
-        top.AddRow(self.w_obj, button("Usa selezione", self.on_pick))
-        lay.AddRow(top)
-        grid = ef.DynamicLayout()
-        grid.Spacing = ed.Size(8, 6)
-        grid.AddRow(label("Stampante"), self.w_printer, label("Materiale"), self.w_material)
-        grid.AddRow(label("Strato (mm)"), self.w_h, label("Larghezza linea (mm)"), self.w_lw)
-        grid.AddRow(label("Pareti"), self.w_walls, label("Riempimento (%)"), self.w_infill)
-        grid.AddRow(label("Strati pieni sopra"), self.w_top, label("Strati pieni sotto"), self.w_bottom)
-        grid.AddRow(label("Limite sbalzo (gradi)"), self.w_limit, self.w_sup, None)
-        lay.AddRow(grid)
+        lay.Padding = ed.Padding(8)
+        lay.Spacing = ed.Size(6, 7)
+        lay.AddRow(self.w_obj)
+        lay.AddRow(button("Usa selezione", self.on_pick, "Analizza gli oggetti selezionati in Rhino"))
+        lay.AddRow(title("Stampa"))
+        lay.AddRow(table([(label("Stampante"), self.w_printer), (label("Materiale"), self.w_material),
+                          (label("Strato (mm)"), self.w_h), (label("Linea (mm)"), self.w_lw),
+                          (label("Pareti"), self.w_walls), (label("Riempimento (%)"), self.w_infill),
+                          (label("Strati pieni sopra"), self.w_top), (label("Strati pieni sotto"), self.w_bottom),
+                          (label("Limite sbalzo (gradi)"), self.w_limit)]))
+        lay.AddRow(title("Supporti"))
+        lay.AddRow(table([(label("Tipo"), self.w_sup)]))
+        lay.AddRow(self.w_bed)
+        lay.AddRow(title("Vista"))
         lay.AddRow(self.w_heat)
-        row = ef.DynamicLayout()
-        row.Spacing = ed.Size(6, 6)
-        row.AddRow(self.w_layers, self.w_layer)
-        lay.AddRow(row)
+        lay.AddRow(table([(self.w_layers, self.w_layer)]))
         lay.AddRow(self.w_layer_info)
-        btn = ef.DynamicLayout()
-        btn.Spacing = ed.Size(6, 6)
-        btn.AddRow(button("Verifica spessori", self.thickness), button("Affetta con Bambu Studio", self.bambu_start),
-                   button("Esporta STL", self.on_export), button("Modifica plastica", self.on_sculpt))
-        lay.AddRow(btn)
-        rot = ef.DynamicLayout()
-        rot.Spacing = ed.Size(6, 6)
-        rot.AddRow(label("Orientamento"), button("Ruota X 90", lambda: self.rotate_by("x")),
-                   button("Ruota Y 90", lambda: self.rotate_by("y")),
-                   button("Migliore", self.best_orientation), button("Come disegnato", self.reset_orientation),
-                   button("Applica al modello", self.apply_orientation))
-        lay.AddRow(rot)
+        lay.AddRow(title("Orientamento"))
+        lay.AddRow(table([(button("Ruota X 90", lambda: self.rotate_by("x")),
+                           button("Ruota Y 90", lambda: self.rotate_by("y"))),
+                          (button("Migliore", self.best_orientation, "Prova gli orientamenti e sceglie meno sbalzi"),
+                           button("Come disegnato", self.reset_orientation)),
+                          (button("Applica al modello", self.apply_orientation,
+                                  "Ruota davvero gli oggetti di Rhino (un passo di Annulla)"), None)]))
+        lay.AddRow(title("Azioni"))
+        lay.AddRow(table([(button("Verifica spessori", self.thickness),
+                           button("Affetta con Bambu", self.bambu_start,
+                                  "Slicer vero con le stesse impostazioni: peso e tempo precisi")),
+                          (button("Esporta STL", self.on_export),
+                           button("Modifica plastica", self.on_sculpt, "Pennelli di scultura su una copia"))]))
         lay.AddRow(self.w_report)
-        lay.AddRow(label("Pareti e riempimento sono un'anteprima; peso e tempo precisi: Affetta con Bambu Studio."))
-        form.Content = lay
-        form.Closed += lambda s_, e: self.on_form_closed()
+        note = label("Pareti, riempimento e supporti sono un'anteprima; peso e tempo precisi: Affetta con Bambu.")
+        note.Wrap = ef.WrapMode.Word
+        lay.AddRow(note)
+        lay.AddRow(None)
+        scroll = ef.Scrollable()
+        scroll.Border = System.Enum.Parse(ef.BorderType, "None")
+        scroll.ExpandContentWidth = False
+        scroll.Content = lay
+
+        def fit(s_=None, e=None):                   # il contenuto segue la larghezza del pannello
+            w = int(scroll.Width)
+            if w > 60:
+                lay.Width = max(230, w - 22)
+        scroll.SizeChanged += fit
+        self.fit = fit
         self.timer = ef.UITimer()
         self.timer.Interval = 1.0
         self.timer.Elapsed += lambda s_, e: self.guard(self.bambu_poll)
-        self.form = form
+        self.docked = False
+        if dock:
+            try:
+                gp_panel.dock("slicer", scroll, self.on_form_closed)
+                self.form, self.docked = scroll, True
+            except Exception:
+                self.error = traceback.format_exc()
+                Rhino.RhinoApp.WriteLine("Generative Print: pannello agganciato non riuscito, apro una finestra\n"
+                                         + self.error)
+        if not self.docked:
+            form = ef.Form()
+            form.Title = "Generative Print - slicer"
+            form.Resizable = True
+            form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+            form.ClientSize = ed.Size(360, 820)
+            form.Content = scroll
+            form.Closed += lambda s_, e: self.on_form_closed()
+            self.form = form
+            form.Show()
         self.loading = False
+        self.fit()
         self.refresh()
-        form.Show()
 
     def on_settings(self):
         s = self.settings
@@ -736,7 +836,12 @@ class Slicer(object):
                   "layer": float(self.w_h.Value), "line_width": float(self.w_lw.Value),
                   "walls": int(self.w_walls.Value), "infill": float(self.w_infill.Value) / 100.0,
                   "top_layers": int(self.w_top.Value), "bottom_layers": int(self.w_bottom.Value),
-                  "overhang_limit_deg": float(self.w_limit.Value), "supports": bool(self.w_sup.Checked)})
+                  "overhang_limit_deg": float(self.w_limit.Value)})
+        kind = SUPPORT_TYPES[max(0, self.w_sup.SelectedIndex)][0]
+        s["supports"] = kind is not None
+        if kind is not None:
+            s["support_type"] = kind
+        s["support_bed_only"] = bool(self.w_bed.Checked)
         self.analyse()
 
     def on_view(self):
@@ -766,7 +871,7 @@ class Slicer(object):
         dlg = ef.SaveFileDialog()
         dlg.Title = "Esporta STL (appoggiato al piano)"
         dlg.Filters.Add(ef.FileFilter("STL", ".stl"))
-        if dlg.ShowDialog(self.form) == ef.DialogResult.Ok:
+        if dlg.ShowDialog(Rhino.UI.RhinoEtoApp.MainWindow) == ef.DialogResult.Ok:
             path = dlg.FileName if dlg.FileName.lower().endswith(".stl") else dlg.FileName + ".stl"
             mesh_io.write_stl(path, self.job.Vw, self.job.F)
             self.extra.append("Esportato " + path)
@@ -785,6 +890,8 @@ class Slicer(object):
         ed.show_panel()
 
     def on_form_closed(self):
+        if self.form is None:
+            return
         if self.timer is not None:
             self.timer.Stop()
         self.form = None
@@ -799,11 +906,12 @@ def get_slicer():
     return sl
 
 
-def start(doc=None, panel=True):
-    """Apre lo slicer sugli oggetti selezionati (o sull'unico oggetto stampabile del documento)."""
+def start(doc=None, panel=True, dock=True):
+    """Apre lo slicer sugli oggetti selezionati (o sull'unico oggetto stampabile del documento).
+    dock=True: scheda agganciata accanto ai Livelli; False: finestra libera."""
     doc = doc or Rhino.RhinoDoc.ActiveDoc
     sl = get_slicer()
     sl.open(doc)
     if panel:
-        sl.show_panel()
+        sl.show_panel(dock)
     return sl

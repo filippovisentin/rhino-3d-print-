@@ -11,11 +11,12 @@ import math
 
 import numpy as np
 
-from . import checks
+from . import checks, supports
 
 DEFAULTS = {"layer": 0.2, "line_width": 0.45, "walls": 2, "infill": 0.15, "top_layers": 5, "bottom_layers": 4,
             "density_g_cm3": 1.24, "filament_diameter": 1.75, "flow_mm3_s": 6.0,
             "bed": [256.0, 256.0, 256.0], "overhang_limit_deg": 43.0, "supports": False}
+DEFAULTS.update(supports.DEFAULTS)
 
 
 def settings(over=None):
@@ -91,8 +92,9 @@ def support_columns(V, F, over_mask, raycast, spacing=3.0):
     return np.c_[P, bottom]
 
 
-def analyse(V, F, over=None, raycast=None, support_spacing=3.0):
-    """raycast (facoltativo): se dato e i supporti sono attivi, li stima a colonne (support_columns)."""
+def analyse(V, F, over=None, raycast=None):
+    """Con i supporti attivi li genera dove servono (generative_print.supports): tipo scelto con
+    settings["support_type"]. raycast non serve piu: resta per compatibilita."""
     s = settings(over)
     V = np.asarray(V, dtype=float)
     lift = float(V[:, 2].min())
@@ -136,12 +138,10 @@ def analyse(V, F, over=None, raycast=None, support_spacing=3.0):
         vol, ext = material(V, F, s)
         sup = 0.0
         if sup_on and needs_support:
-            if raycast is not None:
-                cols = support_columns(V, F, over_mask, raycast, support_spacing)
-                out["support_columns"] = cols
-                sup = float((cols[:, 2] - cols[:, 3]).sum()) * support_spacing ** 2 * SUPPORT_DENSITY
-            else:
-                sup = support_volume(V, F, over_mask, SUPPORT_DENSITY)
+            sp = supports.generate(V, F, over_mask, s, island_points=V[checks.local_minima(V, F)])
+            out["support"] = sp
+            out["support_columns"] = sp["columns"]
+            sup = sp["volume_mm3"]
         rho = float(s["density_g_cm3"]) / 1000.0
         fil = math.pi * (float(s["filament_diameter"]) / 2.0) ** 2
         out.update({"volume_cm3": vol / 1000.0, "extruded_cm3": (ext + sup) / 1000.0,
@@ -166,11 +166,8 @@ def report(res):
         L.append("Volume del solido %.1f cm3 | materiale estruso %.1f cm3" % (res["volume_cm3"], res["extruded_cm3"]))
         L.append("Peso %.1f g | filo %.1f m | tempo circa %.1f h (stime geometriche)"
                  % (res["mass_g"], res["filament_m"], res["time_h"]))
-        if res.get("support_cm3", 0) > 0:
-            cols = res.get("support_columns")
-            L.append("di cui supporti circa %.1f cm3%s (stima: riempiti al %d%%)"
-                     % (res["support_cm3"], (", %d colonne in anteprima" % len(cols)) if cols is not None else "",
-                        round(100 * SUPPORT_DENSITY)))
+        if res.get("support") is not None:
+            L.append(supports.describe(res["support"]))
     else:
         L.append("Mesh aperta: volume, peso e tempo non calcolabili. Chiudi il solido.")
     if not res["fits"]:

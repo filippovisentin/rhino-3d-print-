@@ -1,20 +1,24 @@
 # r: numpy
 """Editor plastico per Rhino 8: pennelli di modellazione con verifica di stampa integrata.
 
-Avvio: esegui `rhino/avvia_editor.py` con _ScriptEditor oppure _RunPythonScript.
+Avvio: esegui `rhino/avvia_editor.py` con _ScriptEditor oppure _RunPythonScript (alias GPEditor).
+I controlli si aprono come scheda agganciata accanto ai Livelli.
 
 Mouse nella vista:
     trascina col tasto sinistro sulla forma   applica il pennello
-    Ctrl + trascina                           inverte il pennello (scava)
+    Ctrl + trascina                           inverte il pennello (scava, cancella la maschera)
     Shift + trascina                          liscia
+    Ctrl + Shift + trascina                   regola il pennello: orizzontale = raggio, verticale = forza
     tasto destro                              ruota la vista, come sempre in Rhino
 
 La forma modificabile puo essere:
 - una PELLE (lampade e vasi generati): si scolpisce la superficie esterna, il solido
   stampabile (spessore, fondo, foro) viene ricostruito a ogni verifica;
 - un SOLIDO chiuso qualunque (forma libera o mesh selezionata).
+
+A ogni colpo si aggiorna solo la zona toccata (normali, mappa degli sbalzi), cosi i pennelli
+restano fluidi anche su mesh grandi.
 """
-import json
 import os
 import sys
 import traceback
@@ -31,17 +35,40 @@ for _p in (REPO, os.path.join(REPO, "rhino")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import gp_panel  # noqa: E402
 import gp_rhino  # noqa: E402
 from generative_print import checks, generators, mesh_io, sculpt, slicer  # noqa: E402
 
 STICKY = "generative_print_editor"
-BRUSH_LABELS = [("draw", "Tira / Spingi"), ("inflate", "Gonfia"), ("smooth", "Liscia"),
-                ("flatten", "Appiattisci"), ("pinch", "Pizzica"), ("grab", "Afferra")]
+BRUSH_LABELS = [("draw", "Tira / Spingi"), ("clay", "Argilla"), ("inflate", "Gonfia"), ("layer", "Strato"),
+                ("crease", "Piega"), ("smooth", "Liscia"), ("flatten", "Appiattisci"), ("scrape", "Raschia"),
+                ("pinch", "Pizzica"), ("grab", "Afferra"), ("mask", "Maschera")]
+BRUSH_HELP = {"draw": "Alza la superficie lungo la normale (Ctrl: scava).",
+              "clay": "Aggiunge materiale a strisce piatte, riempiendo le conche (Ctrl: toglie).",
+              "inflate": "Gonfia: ogni punto si sposta lungo la propria normale.",
+              "layer": "Rilievo ad altezza costante: ripassando non cresce oltre.",
+              "crease": "Solco netto che stringe la superficie (Ctrl: cresta).",
+              "smooth": "Liscia le irregolarita.",
+              "flatten": "Porta la zona su un piano.",
+              "scrape": "Abbassa solo le creste (Ctrl: riempie solo le valli).",
+              "pinch": "Stringe i punti verso il centro del pennello.",
+              "grab": "Afferra e trascina la zona.",
+              "mask": "Dipinge una protezione: la zona scura non si muove (Ctrl: cancella)."}
+FRACTION_BRUSHES = ("smooth", "flatten", "pinch", "scrape")
 CLAY = (214, 208, 198)
+UNDO_STEPS = 60
 
 
 def int_array(values):
-    return System.Array[System.Int32](values.tolist())
+    """Array di interi .NET da numpy, copiando la memoria in blocco (veloce anche con molte facce)."""
+    a = np.ascontiguousarray(values, dtype=np.int32)
+    out = System.Array.CreateInstance(System.Int32, len(a))
+    if len(a):
+        try:
+            System.Runtime.InteropServices.Marshal.Copy(System.IntPtr(System.Int64(a.ctypes.data)), out, 0, len(a))
+        except Exception:
+            return System.Array[System.Int32](a.tolist())
+    return out
 
 
 class Session(object):
@@ -57,14 +84,23 @@ class Session(object):
         self.grid = (meta["rings"], meta["segments"]) if self.kind == "skin" else None
         self.base_ring = np.arange(self.grid[1]) if self.grid else None
         self.edges = sculpt.edge_list(self.F)
+        self.topo = sculpt.Topology(self.F, len(self.V))
         self.mesh = gp_rhino.to_rhino_mesh(self.V, self.F)
         self.normals = checks.vertex_normals(self.V, self.F)
-        self.undo_stack = []
+        self.cross = np.zeros((len(self.F), 3))      # prodotto vettoriale per faccia (normale x 2 area)
+        self.ang = np.zeros(len(self.F))
+        self.area = np.zeros(len(self.F))
+        self.cls = None                              # classe di ogni faccia: 0 ok, 1 vicina, 2 oltre, 3 maschera
+        self.mask = np.zeros(len(self.V))            # protezione per vertice, 0..1
+        self.face_mask = np.zeros(len(self.F), dtype=bool)
+        self.undo_stack, self.redo_stack = [], []
+        self.V_ref, self.mask_ref, self.touched = None, None, []
         self.brush = "draw"
         self.radius = 18.0
         self.strength = 0.5          # 0..1 dal cursore del pannello
         self.symmetry = 1
         self.mirror = None           # None, "x" oppure "y": specchio rispetto al centro dell'oggetto
+        self.connected = True        # il pennello resta sulla superficie collegata al punto toccato
         c = (self.V.max(axis=0) + self.V.min(axis=0)) / 2.0
         self.centre = (0.0, 0.0) if self.kind == "skin" else (float(c[0]), float(c[1]))
         self.heatmap = True
@@ -79,76 +115,100 @@ class Session(object):
         self.report = ""
         self.log = []                # pennellate applicate, per il diario
         self.respect = False         # a fine pennellata riporta la zona scolpita sotto il limite
-        self.collect = []            # vertici mossi dalla pennellata in corso
         self.respect_note = ""
         self.dirty = False
         self.limit = float(self.params["print"]["overhang_limit_deg"])
-        self.material = Rhino.Display.DisplayMaterial(sd.Color.FromArgb(*CLAY))
-        self.material.IsTwoSided = True
-        self.material.BackDiffuse = sd.Color.FromArgb(170, 150, 135)
-        self.mat_warn = Rhino.Display.DisplayMaterial(sd.Color.FromArgb(240, 175, 50))
-        self.mat_over = Rhino.Display.DisplayMaterial(sd.Color.FromArgb(215, 45, 40))
-        for m in (self.mat_warn, self.mat_over):
+
+        def mat(rgb, back=None):
+            m = Rhino.Display.DisplayMaterial(sd.Color.FromArgb(*rgb))
             m.IsTwoSided = True
-            m.BackDiffuse = m.Diffuse
+            m.BackDiffuse = sd.Color.FromArgb(*(back or rgb))
+            return m
+        self.material = mat(CLAY, (170, 150, 135))
+        self.mat_warn, self.mat_over, self.mat_mask = mat((240, 175, 50)), mat((215, 45, 40)), mat((92, 96, 108))
         self.face_sets = None
         self.max_angle = 0.0
         self.over_area = 0.0
+        self._faces(None)
         self.classify()
 
     # ---------------------------------------------------------------- sincronizzazione
-    def classify(self):
-        """Divide le facce in tre gruppi per la mappa degli sbalzi: ok, vicine alla
-        soglia (ultimi 10 gradi), oltre soglia. Stessa regola della verifica."""
-        n, areas = checks.face_normals_areas(self.V, self.F)
+    def _faces(self, faces):
+        """Ricalcola normale, area e angolo di sbalzo delle facce indicate (None = tutte)."""
+        f = slice(None) if faces is None else faces
+        T = self.V[self.F[f]]
+        n = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0])
+        ln = np.linalg.norm(n, axis=1)
+        nz = n[:, 2] / np.maximum(ln, 1e-30)
         if self.kind == "skin":      # parete sottile: conta l'inclinazione in entrambi i versi
-            lean = np.abs(n[:, 2])
+            lean = np.abs(nz)
         else:
-            lean = np.clip(-n[:, 2], 0.0, 1.0)
-            on_bed = self.V[:, 2][self.F].max(axis=1) <= checks.BED_TOL
-            lean = np.where(on_bed, 0.0, lean)
-        ang = np.degrees(np.arcsin(np.clip(lean, 0.0, 1.0)))
-        over = ang > self.limit + checks.ANGLE_TOL
-        warn = (ang > self.limit - 10.0) & ~over
-        self.max_angle = float(ang.max()) if len(ang) else 0.0
-        self.over_area = float(areas[over].sum())
-        self.face_sets = (int_array(np.where(~over & ~warn)[0]), int_array(np.where(warn)[0]),
-                          int_array(np.where(over)[0]))
+            lean = np.where(T[:, :, 2].max(axis=1) <= checks.BED_TOL, 0.0, np.clip(-nz, 0.0, 1.0))
+        self.cross[f] = n
+        self.area[f] = ln / 2.0
+        self.ang[f] = np.degrees(np.arcsin(np.clip(lean, 0.0, 1.0)))
+
+    def classify(self, faces=None, force=False):
+        """Mappa degli sbalzi: facce ok, vicine alla soglia (ultimi 10 gradi), oltre soglia, piu le
+        facce protette dalla maschera. Gli elenchi per il disegno si rifanno solo se qualcosa cambia."""
+        over = self.ang > self.limit + checks.ANGLE_TOL
+        warn = (self.ang > self.limit - 10.0) & ~over
+        self.max_angle = float(self.ang.max()) if len(self.ang) else 0.0
+        self.over_area = float(self.area[over].sum())
+        cls = np.where(over, 2, np.where(warn, 1, np.where(self.face_mask, 3, 0))).astype(np.int8)
+        if not self.heatmap:
+            cls = np.where(self.face_mask, 3, 0).astype(np.int8)
+        if not force and self.cls is not None:
+            same = (cls[faces] == self.cls[faces]).all() if faces is not None else np.array_equal(cls, self.cls)
+            if same:
+                return
+        self.cls = cls
+        self.face_sets = tuple(int_array(np.where(cls == k)[0]) for k in (0, 1, 2, 3))
 
     def push(self, idx=None):
-        """Copia i vertici numpy nella mesh di Rhino e aggiorna normali e colori."""
-        ids = np.arange(len(self.V)) if idx is None else idx
+        """Copia i vertici numpy nella mesh di Rhino e aggiorna normali e mappa, solo dove serve."""
+        full = idx is None or len(idx) > 0.5 * len(self.V)
+        ids = np.arange(len(self.V)) if idx is None else np.asarray(idx)
         set_v = self.mesh.Vertices.SetVertex
         for i, (x, y, z) in zip(ids.tolist(), self.V[ids].tolist()):
             set_v(i, x, y, z)
         self.mesh.Normals.ComputeNormals()
-        self.normals = checks.vertex_normals(self.V, self.F)
-        if self.heatmap:
+        if full:
+            self._faces(None)
+            self.normals = checks.vertex_normals(self.V, self.F)
             self.classify()
+        else:
+            faces = self.topo.faces_of(ids)
+            self._faces(faces)
+            vs = np.unique(self.F[faces])
+            self.normals[vs] = self.topo.vertex_normals(self.cross, vs)
+            self.classify(faces)
         self.solid = None
         self.dirty = True
-        if idx is not None:
-            self.collect.append(np.asarray(idx))
+        self.touched.append(ids)
+
+    def set_mask(self, mask):
+        self.mask = np.clip(np.asarray(mask, dtype=float), 0.0, 1.0)
+        self.face_mask = self.mask[self.F].mean(axis=1) > 0.5
+        self.classify()
 
     def enforce_limit(self):
         """Se l'opzione e attiva, riporta sotto il limite di sbalzo la zona toccata dall'ultima
         pennellata (sculpt.relax_overhang_mesh). Restituisce il risultato o None."""
-        touched, self.collect = self.collect, []
         self.respect_note = ""
-        if not self.respect or not touched:
+        if not self.respect or not self.touched:
             return None
-        region = np.unique(np.concatenate(touched))
+        region = np.unique(np.concatenate(self.touched))
         skin = self.kind == "skin"
-        fixed = None
+        fixed = (self.V[:, 2] <= checks.BED_TOL) | (self.mask > 0.5)
         if skin:
-            fixed = np.zeros(len(self.V), dtype=bool)
+            fixed = self.mask > 0.5
             fixed[self.base_ring] = True
         res = sculpt.relax_overhang_mesh(self.V, self.F, self.edges, self.limit, region=region,
                                          two_sided=skin, horizontal=skin, fixed=fixed)
         if len(res["moved"]):
             sculpt.constrain(self.V, self.base_ring)
             self.push(res["moved"])
-            self.collect = []
         self.respect_note = ("limite rispettato (%d punti corretti)" % len(res["moved"]) if res["ok"]
                              else "limite NON raggiunto nella zona: %.0f gradi" % res["max_deg"])
         return res
@@ -168,33 +228,102 @@ class Session(object):
         p = origin + d * t
         return np.array([p.X, p.Y, p.Z])
 
-    # ---------------------------------------------------------------- pennelli
+    def nearest(self, point):
+        return int(np.argmin(((self.V - np.asarray(point, dtype=float)) ** 2).sum(axis=1)))
+
+    # ---------------------------------------------------------------- annulla e ripeti
     def begin(self):
-        self.collect = []
-        self.undo_stack.append(self.V.copy())
-        if len(self.undo_stack) > 30:
-            self.undo_stack.pop(0)
+        """Inizio di una pennellata: da qui si misura cio che cambia (per annulla, strato, afferra)."""
+        self.V_ref = self.V.copy()
+        self.mask_ref = self.mask.copy()
+        self.touched = []
+
+    def end(self):
+        """Fine della pennellata: applica il limite di sbalzo se richiesto e registra il passo di annulla."""
+        if self.V_ref is None:
+            return None
+        res = self.enforce_limit()
+        rec = {}
+        if self.touched:
+            idx = np.unique(np.concatenate(self.touched))
+            idx = idx[(self.V[idx] != self.V_ref[idx]).any(axis=1)]
+            if len(idx):
+                rec["v"] = (idx, self.V_ref[idx].copy(), self.V[idx].copy())
+        m = np.where(self.mask != self.mask_ref)[0]
+        if len(m):
+            rec["m"] = (m, self.mask_ref[m].copy(), self.mask[m].copy())
+        if rec:
+            self.undo_stack.append(rec)
+            del self.undo_stack[:-UNDO_STEPS]
+            self.redo_stack = []
+        self.V_ref, self.mask_ref, self.touched = None, None, []
+        return res
+
+    def _restore(self, rec, which):
+        if "v" in rec:
+            idx = rec["v"][0]
+            self.V[idx] = rec["v"][which]
+            self.push(idx)
+        if "m" in rec:
+            self.mask[rec["m"][0]] = rec["m"][which]
+            self.set_mask(self.mask)
+        self.touched = []
 
     def undo(self):
-        if self.undo_stack:
-            self.V = self.undo_stack.pop()
-            self.push(None)
+        if not self.undo_stack:
+            return False
+        rec = self.undo_stack.pop()
+        self._restore(rec, 1)
+        self.redo_stack.append(rec)
+        return True
 
+    def redo(self):
+        if not self.redo_stack:
+            return False
+        rec = self.redo_stack.pop()
+        self._restore(rec, 2)
+        self.undo_stack.append(rec)
+        return True
+
+    # ---------------------------------------------------------------- pennelli
     def dab_amount(self, brush, invert):
-        if brush in ("smooth", "flatten", "pinch"):
-            return max(0.05, self.strength)
+        if brush in FRACTION_BRUSHES:
+            f = max(0.05, self.strength)
+            return -f if (invert and brush == "scrape") else f
+        if brush == "mask":
+            return -1.0 if invert else 1.0
         mm = 0.15 + 2.5 * self.strength * (self.radius / 20.0)
         return -mm if invert else mm
+
+    def region(self, c):
+        """Vertici sotto il pennello centrato in c e loro distanza dal centro."""
+        if self.connected:
+            idx = self.topo.connected(self.V, self.nearest(c), c, self.radius)
+        else:
+            idx = np.where(((self.V - c) ** 2).sum(axis=1) < self.radius ** 2)[0]
+        return idx, np.linalg.norm(self.V[idx] - c, axis=1)
 
     def apply_dab(self, center, brush=None, invert=False, amount=None):
         brush = brush or self.brush
         amount = self.dab_amount(brush, invert) if amount is None else amount
+        mask = self.mask if self.mask.any() else None
         moved = []
         for c, _ in sculpt.symmetry_copies(np.asarray(center, dtype=float), None, self.symmetry,
                                            self.mirror, self.centre):
-            idx = sculpt.dab(self.V, self.normals, self.edges, c, self.radius, amount, brush)
+            if brush == "mask":
+                idx, dist = self.region(c)
+                w = sculpt.falloff(dist, self.radius) * max(0.25, self.strength) * 3.0
+                self.mask[idx] = np.clip(self.mask[idx] + (w if amount > 0 else -w), 0.0, 1.0)
+                continue
+            seed = self.nearest(c) if self.connected else None
+            idx = sculpt.dab(self.V, self.normals, self.edges, c, self.radius, amount, brush,
+                             topo=self.topo, seed=seed, mask=mask, base=self.V_ref)
             if len(idx):
                 moved.append(idx)
+        if brush == "mask":
+            self.set_mask(self.mask)
+            self.dirty = True
+            return
         if not moved:
             return
         idx = np.unique(np.concatenate(moved))
@@ -223,7 +352,7 @@ class Session(object):
             if n:
                 last = p
         if record:
-            self.enforce_limit()
+            self.end()
 
     def grab_begin(self, view, point, hit):
         cam = view.ActiveViewport.CameraDirection
@@ -231,27 +360,25 @@ class Session(object):
         copies = sculpt.symmetry_copies(hit, None, self.symmetry, self.mirror, self.centre)
         sets = []
         for c, _ in copies:
-            d = np.linalg.norm(self.V - c, axis=1)
-            idx = np.where(d < self.radius)[0]
-            sets.append((idx, sculpt.falloff(d[idx], self.radius)[:, None]))
-        self.grab = {"plane": plane, "anchor": hit, "V0": self.V.copy(), "sets": sets}
+            idx, dist = self.region(c)
+            sets.append((idx, (sculpt.falloff(dist, self.radius) * (1.0 - self.mask[idx]))[:, None]))
+        self.grab = {"plane": plane, "anchor": hit, "sets": sets,
+                     "all": np.unique(np.concatenate([i for i, _ in sets])) if sets else np.zeros(0, dtype=np.int64)}
 
     def grab_move(self, view, point):
         g = self.grab
         origin, d = self.ray(view, point)
         ok, t = rg.Intersect.Intersection.LinePlane(rg.Line(origin, origin + d * 1.0), g["plane"])
-        if not ok:
+        if not ok or not len(g["all"]):
             return
         p = origin + d * t
         delta = np.array([p.X, p.Y, p.Z]) - g["anchor"]
-        self.V[:] = g["V0"]
-        moved = []
+        self.V[g["all"]] = self.V_ref[g["all"]]
         for (idx, w), (_, dv) in zip(g["sets"], sculpt.symmetry_copies(g["anchor"], delta, self.symmetry,
                                                                         self.mirror, self.centre)):
             self.V[idx] += dv * w
-            moved.append(idx)
         sculpt.constrain(self.V, self.base_ring)
-        self.push(np.unique(np.concatenate(moved)) if moved else None)
+        self.push(g["all"])
 
     # ---------------------------------------------------------------- solido e verifiche
     def build_solid(self):
@@ -339,17 +466,18 @@ class Conduit(Rhino.Display.DisplayConduit):
                 e.Display.DrawMeshShaded(s.layer_mesh, s.material)
                 if s.layer_lines:
                     e.Display.DrawLines(s.layer_lines, sd.Color.FromArgb(230, 90, 20), 3)
-            elif s.heatmap and s.face_sets is not None:
-                for faces, mat in zip(s.face_sets, (s.material, s.mat_warn, s.mat_over)):
+            elif s.face_sets is not None:
+                for faces, mat in zip(s.face_sets, (s.material, s.mat_warn, s.mat_over, s.mat_mask)):
                     if faces.Length:
                         e.Display.DrawMeshShaded(s.mesh, mat, faces)
             else:
                 e.Display.DrawMeshShaded(s.mesh, s.material)
             if s.cursor is not None and s.layer_z is None:
                 p, n = s.cursor
-                circle = rg.Circle(rg.Plane(rg.Point3d(p[0], p[1], p[2]), rg.Vector3d(n[0], n[1], n[2])),
-                                   s.radius)
-                e.Display.DrawCircle(circle, sd.Color.FromArgb(30, 120, 230), 2)
+                plane = rg.Plane(rg.Point3d(p[0], p[1], p[2]), rg.Vector3d(n[0], n[1], n[2]))
+                blue = sd.Color.FromArgb(30, 120, 230)
+                e.Display.DrawCircle(rg.Circle(plane, s.radius), blue, 2)
+                e.Display.DrawCircle(rg.Circle(plane, max(0.3, s.radius * s.strength)), blue, 1)
         except Exception:
             self.ed.fail()
 
@@ -358,6 +486,9 @@ class Mouse(Rhino.UI.MouseCallback):
     def __init__(self, editor):
         super().__init__()
         self.ed = editor
+        self.adjust = None
+        self.brush = "draw"
+        self.invert = False
 
     def _ok(self, e):
         s = self.ed.session
@@ -368,6 +499,10 @@ class Mouse(Rhino.UI.MouseCallback):
             if not self._ok(e) or e.MouseButton != Rhino.UI.MouseButton.Left:
                 return
             s = self.ed.session
+            if e.CtrlKeyDown and e.ShiftKeyDown:           # regola raggio e forza trascinando
+                self.adjust = (e.ViewportPoint.X, e.ViewportPoint.Y, s.radius, s.strength)
+                e.Cancel = True
+                return
             hit = s.hit(e.View, e.ViewportPoint)
             if hit is None:
                 return
@@ -390,6 +525,12 @@ class Mouse(Rhino.UI.MouseCallback):
             if not self._ok(e):
                 return
             s = self.ed.session
+            if self.adjust is not None:
+                x0, y0, r0, f0 = self.adjust
+                s.radius = float(np.clip(r0 + (e.ViewportPoint.X - x0) * 0.2, 2.0, 80.0))
+                s.strength = float(np.clip(f0 - (e.ViewportPoint.Y - y0) * 0.004, 0.01, 1.0))
+                e.View.Redraw()
+                return
             if s.stroking and self.brush == "grab":
                 s.grab_move(e.View, e.ViewportPoint)
                 e.View.Redraw()
@@ -400,8 +541,7 @@ class Mouse(Rhino.UI.MouseCallback):
                     s.cursor = None
                     e.View.Redraw()
                 return
-            near = int(np.argmin(np.linalg.norm(s.V - hit, axis=1)))
-            s.cursor = (hit, s.normals[near])
+            s.cursor = (hit, s.normals[s.nearest(hit)])
             if s.stroking:
                 if np.linalg.norm(hit - s.last_dab) >= max(s.radius * 0.25, 0.5):
                     s.stroke([s.last_dab, hit], self.brush, self.invert, record=False)
@@ -413,11 +553,16 @@ class Mouse(Rhino.UI.MouseCallback):
     def OnMouseUp(self, e):
         try:
             s = self.ed.session
+            if self.adjust is not None:
+                self.adjust = None
+                e.Cancel = True
+                self.ed.sync_widgets()
+                return
             if s is not None and s.stroking:
                 s.stroking = False
                 s.grab = None
                 e.Cancel = True
-                s.enforce_limit()
+                s.end()
                 self.ed.refresh_status()
                 e.View.Redraw()
         except Exception:
@@ -431,6 +576,8 @@ class Editor(object):
         self.conduit = Conduit(self)
         self.mouse = Mouse(self)
         self.form = None
+        self.docked = False
+        self.loading = False
         self.error = None
         self.hidden = []
 
@@ -494,107 +641,166 @@ class Editor(object):
         self.session = None
         if close_form and self.form is not None:
             form, self.form = self.form, None
-            form.Close()
+            if self.docked:
+                gp_panel.undock("editor")
+            else:
+                form.Close()
 
     # ----------------------------------------------------------- interfaccia Eto
-    def show_panel(self):
+    def show_panel(self, dock=True):
+        """Apre i controlli: scheda agganciata accanto ai Livelli (dock=True) oppure finestra."""
         import Eto.Forms as ef
         import Eto.Drawing as ed
         if self.form is not None:
-            self.form.BringToFront()
+            if self.docked:
+                gp_panel.dock("editor", self.form, self.on_form_closed)
+            else:
+                self.form.BringToFront()
             return
-        form = ef.Form()
-        form.Title = "Generative Print - editor plastico"
-        form.Padding = ed.Padding(10)
-        form.Resizable = True
-        form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+        self.loading = True
 
-        self.w_status = ef.Label()
-        self.w_brush = ef.DropDown()
-        for _, label in BRUSH_LABELS:
-            self.w_brush.Items.Add(label)
-        self.w_brush.SelectedIndex = 0
-        self.w_radius = ef.Slider()
-        self.w_radius.MinValue, self.w_radius.MaxValue, self.w_radius.Value = 2, 80, 18
-        self.w_strength = ef.Slider()
-        self.w_strength.MinValue, self.w_strength.MaxValue, self.w_strength.Value = 1, 100, 50
-        self.w_sym = ef.NumericStepper()
-        self.w_sym.MinValue, self.w_sym.MaxValue, self.w_sym.Value = 1, 64, 1
-        self.w_heat = ef.CheckBox()
-        self.w_heat.Text = "Mappa degli sbalzi (rosso = oltre soglia)"
-        self.w_heat.Checked = True
-        self.w_respect = ef.CheckBox()
-        self.w_respect.Text = "Rispetta il limite di sbalzo mentre scolpisco (corregge la zona a fine pennellata)"
-        self.w_respect.Checked = bool(self.session.respect) if self.session is not None else False
-        self.w_respect.CheckedChanged += lambda s, e: self.guard(self.on_settings)
-        self.w_layers = ef.CheckBox()
-        self.w_layers.Text = "Anteprima a strati"
-        self.w_layer = ef.Slider()
-        self.w_layer.MinValue, self.w_layer.MaxValue, self.w_layer.Value = 0, 100, 0
-        self.w_layer.Enabled = False
-        self.w_layer_info = ef.Label()
-        self.w_report = ef.TextArea()
-        self.w_report.ReadOnly = True
-        self.w_report.Font = ed.Font("Consolas", 8.5)
-        self.w_report.Wrap = False
-        self.w_report.Size = ed.Size(700, 260)
-        for w in (self.w_radius, self.w_strength, self.w_layer):
-            w.Width = 380
-        self.w_radius_l, self.w_strength_l = ef.Label(), ef.Label()
-
-        def label(text):
+        def label(text, wrap=False):
             lb = ef.Label()
             lb.Text = text
+            if wrap:
+                lb.Wrap = ef.WrapMode.Word
             return lb
 
-        def button(text, handler):
+        def title(text):
+            lb = label(text)
+            lb.Font = ed.SystemFonts.Bold()
+            return lb
+
+        def button(text, handler, tip=None):
             b = ef.Button()
             b.Text = text
+            if tip:
+                b.ToolTip = tip
             b.Click += lambda s, e: self.guard(handler)
             return b
 
-        self.w_brush.SelectedIndexChanged += lambda s, e: self.guard(self.on_settings)
-        self.w_radius.ValueChanged += lambda s, e: self.guard(self.on_settings)
-        self.w_strength.ValueChanged += lambda s, e: self.guard(self.on_settings)
-        self.w_sym.ValueChanged += lambda s, e: self.guard(self.on_settings)
+        def check(text, value, handler):
+            w = ef.CheckBox()
+            w.Text = text
+            w.Checked = value
+            w.CheckedChanged += lambda s, e: self.guard(handler)
+            return w
+
+        def slider(lo, hi, value, handler):
+            w = ef.Slider()
+            w.MinValue, w.MaxValue, w.Value = lo, hi, value
+            w.ValueChanged += lambda s, e: self.guard(handler)
+            return w
+
+        def table(rows):
+            lay = ef.DynamicLayout()
+            lay.Spacing = ed.Size(6, 5)
+            for row in rows:
+                lay.AddRow(*row)
+            return lay
+
+        s = self.session
+        self.w_status = label("", True)
+        self.w_brush = ef.DropDown()
+        for _, text in BRUSH_LABELS:
+            self.w_brush.Items.Add(text)
+        self.w_brush.SelectedIndex = 0
+        self.w_brush.SelectedIndexChanged += lambda s_, e: self.guard(self.on_settings)
+        self.w_help = label("", True)
+        self.w_radius = slider(2, 80, 18, self.on_settings)
+        self.w_strength = slider(1, 100, 50, self.on_settings)
+        self.w_radius_l, self.w_strength_l = ef.Label(), ef.Label()
+        self.w_sym = ef.NumericStepper()
+        self.w_sym.MinValue, self.w_sym.MaxValue, self.w_sym.Value = 1, 64, 1
+        self.w_sym.ValueChanged += lambda s_, e: self.guard(self.on_settings)
         self.w_mirror = ef.DropDown()
-        for text in ("Nessuno", "Specchio X (sinistra / destra)", "Specchio Y (davanti / dietro)"):
+        for text in ("Nessuno", "X (sinistra / destra)", "Y (davanti / dietro)"):
             self.w_mirror.Items.Add(text)
         self.w_mirror.SelectedIndex = 0
-        self.w_mirror.SelectedIndexChanged += lambda s, e: self.guard(self.on_settings)
-        self.w_heat.CheckedChanged += lambda s, e: self.guard(self.on_heat)
-        self.w_layers.CheckedChanged += lambda s, e: self.guard(self.on_layers)
-        self.w_layer.ValueChanged += lambda s, e: self.guard(self.on_layers)
+        self.w_mirror.SelectedIndexChanged += lambda s_, e: self.guard(self.on_settings)
+        self.w_connected = check("Solo la superficie toccata", s.connected if s else True, self.on_settings)
+        self.w_connected.ToolTip = "Il pennello non passa sull'altro lato di una parete sottile"
+        self.w_respect = check("Rispetta il limite di sbalzo", bool(s.respect) if s else False, self.on_settings)
+        self.w_respect.ToolTip = "A fine pennellata la zona toccata viene riportata sotto il limite"
+        self.w_heat = check("Mappa degli sbalzi", True, self.on_heat)
+        self.w_heat.ToolTip = "Arancio = vicino alla soglia, rosso = oltre"
+        self.w_layers = check("Strati", False, self.on_layers)
+        self.w_layer = slider(0, 100, 0, self.on_layers)
+        self.w_layer.Enabled = False
+        self.w_layer_info = label("", True)
+        self.w_report = ef.TextArea()
+        self.w_report.ReadOnly = True
+        self.w_report.Font = ed.Font("Consolas", 8.5)
+        self.w_report.Wrap = True
+        self.w_report.Height = 220
 
         lay = ef.DynamicLayout()
-        lay.Spacing = ed.Size(6, 6)
+        lay.Padding = ed.Padding(8)
+        lay.Spacing = ed.Size(6, 7)
         lay.AddRow(self.w_status)
-        lay.AddRow(label("Pennello"), self.w_brush)
-        lay.AddRow(self.w_radius_l, self.w_radius)
-        lay.AddRow(self.w_strength_l, self.w_strength)
-        lay.AddRow(label("Simmetria radiale (copie)"), self.w_sym)
-        lay.AddRow(label("Simmetria a specchio"), self.w_mirror)
-        lay.AddRow(self.w_heat)
+        lay.AddRow(title("Pennello"))
+        lay.AddRow(self.w_brush)
+        lay.AddRow(self.w_help)
+        lay.AddRow(table([(self.w_radius_l, self.w_radius), (self.w_strength_l, self.w_strength)]))
+        lay.AddRow(table([(button("Annulla", self.on_undo, "Annulla l'ultima pennellata"),
+                           button("Ripeti", self.on_redo, "Rifa la pennellata annullata"))]))
+        lay.AddRow(title("Simmetria"))
+        lay.AddRow(table([(label("Copie radiali"), self.w_sym), (label("Specchio"), self.w_mirror)]))
+        lay.AddRow(title("Maschera"))
+        lay.AddRow(table([(button("Cancella", self.on_mask_clear, "Toglie tutta la protezione"),
+                           button("Inverti", self.on_mask_invert, "Scambia zona protetta e zona libera"))]))
+        lay.AddRow(title("Opzioni"))
+        lay.AddRow(self.w_connected)
         lay.AddRow(self.w_respect)
-        lay.AddRow(self.w_layers, self.w_layer)
+        lay.AddRow(self.w_heat)
+        lay.AddRow(table([(self.w_layers, self.w_layer)]))
         lay.AddRow(self.w_layer_info)
-        row = ef.DynamicLayout()
-        row.Spacing = ed.Size(6, 6)
-        row.AddRow(button("Annulla pennellata", self.on_undo), button("Verifica stampa", self.on_verify),
-                   button("Esporta STL", self.on_export))
-        row.AddRow(button("Nuova forma libera", self.on_new_blob), button("Nuova lampada / vaso", self.on_new_vessel),
-                   button("Applica e chiudi", self.on_apply))
-        lay.AddRow(row)
+        lay.AddRow(title("Azioni"))
+        lay.AddRow(table([(button("Verifica stampa", self.on_verify), button("Esporta STL", self.on_export)),
+                          (button("Nuova forma libera", self.on_new_blob),
+                           button("Nuova lampada", self.on_new_vessel, "Nuova lampada o vaso da scolpire")),
+                          (button("Applica e chiudi", self.on_apply, "Scrive la forma nel documento"), None)]))
         lay.AddRow(self.w_report)
-        lay.AddRow(label("Sinistro: pennello   Ctrl: scava   Shift: liscia   Destro: ruota la vista"))
-        form.Content = lay
-        form.Closed += lambda s, e: self.on_form_closed()
-        self.form = form
+        lay.AddRow(label("Sinistro: pennello. Ctrl: inverte. Shift: liscia. Ctrl+Shift e trascina: raggio "
+                         "(orizzontale) e forza (verticale). Destro: ruota la vista.", True))
+        lay.AddRow(None)
+        scroll = ef.Scrollable()
+        scroll.Border = System.Enum.Parse(ef.BorderType, "None")
+        scroll.ExpandContentWidth = False
+        scroll.Content = lay
+
+        def fit(s_=None, e=None):                   # il contenuto segue la larghezza del pannello
+            w = int(scroll.Width)
+            if w > 60:
+                lay.Width = max(230, w - 22)
+        scroll.SizeChanged += fit
+        self.docked = False
+        if dock:
+            try:
+                gp_panel.dock("editor", scroll, self.on_form_closed)
+                self.form, self.docked = scroll, True
+            except Exception:
+                self.error = traceback.format_exc()
+                Rhino.RhinoApp.WriteLine("Generative Print: pannello agganciato non riuscito, apro una finestra\n"
+                                         + self.error)
+        if not self.docked:
+            form = ef.Form()
+            form.Title = "Generative Print - editor plastico"
+            form.Resizable = True
+            form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+            form.ClientSize = ed.Size(360, 820)
+            form.Content = scroll
+            form.Closed += lambda s_, e: self.on_form_closed()
+            self.form = form
+            form.Show()
+        self.loading = False
+        fit()
         self.sync_form()
         self.refresh_status()
-        form.Show()
 
     def guard(self, fn):
+        if self.loading:
+            return
         try:
             fn()
         except Exception:
@@ -608,15 +814,26 @@ class Editor(object):
         self.on_settings()
         self.w_layer.MaxValue = max(1, self.session.layer_count() - 1)
 
+    def sync_widgets(self):
+        """Porta nei cursori raggio e forza cambiati col mouse."""
+        s = self.session
+        if self.form is None or s is None:
+            return
+        self.loading = True
+        self.w_radius.Value = int(round(s.radius))
+        self.w_strength.Value = int(round(100 * s.strength))
+        self.loading = False
+        self.w_radius_l.Text = "Raggio %d mm" % round(s.radius)
+        self.w_strength_l.Text = "Forza %d %%" % round(100 * s.strength)
+
     def refresh_status(self):
         if self.form is None or self.session is None:
             return
         s = self.session
-        s.classify()
-        kind = "pelle di lampada/vaso" if s.kind == "skin" else "solido chiuso"
-        self.w_status.Text = ("%s, %d vertici | sbalzo max %.0f gradi | oltre soglia: %.0f mm2%s"
-                              % (kind, len(s.V), s.max_angle, s.over_area,
-                                 (" | " + s.respect_note) if s.respect_note else ""))
+        kind = "Pelle di lampada/vaso" if s.kind == "skin" else "Solido"
+        self.w_status.Text = ("%s, %d vertici. Sbalzo max %.0f gradi, oltre soglia %.0f mm2. Annulla: %d%s"
+                              % (kind, len(s.V), s.max_angle, s.over_area, len(s.undo_stack),
+                                 (". " + s.respect_note) if s.respect_note else ""))
 
     def on_settings(self):
         s = self.session
@@ -627,15 +844,16 @@ class Editor(object):
         s.strength = self.w_strength.Value / 100.0
         s.symmetry = int(self.w_sym.Value)
         s.respect = bool(self.w_respect.Checked)
+        s.connected = bool(self.w_connected.Checked)
         s.mirror = (None, "x", "y")[max(0, self.w_mirror.SelectedIndex)]
+        self.w_help.Text = BRUSH_HELP[s.brush]
         self.w_radius_l.Text = "Raggio %d mm" % self.w_radius.Value
         self.w_strength_l.Text = "Forza %d %%" % self.w_strength.Value
 
     def on_heat(self):
         s = self.session
         s.heatmap = bool(self.w_heat.Checked)
-        if s.heatmap:
-            s.classify()
+        s.classify(force=True)
         s.doc.Views.Redraw()
 
     def on_layers(self):
@@ -652,6 +870,25 @@ class Editor(object):
         self.session.doc.Views.Redraw()
         self.refresh_status()
 
+    def on_redo(self):
+        self.session.redo()
+        self.session.doc.Views.Redraw()
+        self.refresh_status()
+
+    def _mask(self, new):
+        s = self.session
+        s.begin()
+        s.set_mask(new)
+        s.end()
+        s.doc.Views.Redraw()
+        self.refresh_status()
+
+    def on_mask_clear(self):
+        self._mask(np.zeros(len(self.session.V)))
+
+    def on_mask_invert(self):
+        self._mask(1.0 - self.session.mask)
+
     def on_verify(self):
         self.w_report.Text = "Verifica in corso..."
         self.w_report.Text = self.session.verify()
@@ -661,7 +898,7 @@ class Editor(object):
         dlg = ef.SaveFileDialog()
         dlg.Title = "Esporta STL"
         dlg.Filters.Add(ef.FileFilter("STL", ".stl"))
-        if dlg.ShowDialog(self.form) == ef.DialogResult.Ok:
+        if dlg.ShowDialog(Rhino.UI.RhinoEtoApp.MainWindow) == ef.DialogResult.Ok:
             path = dlg.FileName if dlg.FileName.lower().endswith(".stl") else dlg.FileName + ".stl"
             n = self.session.export_stl(path)
             self.w_report.Text = self.session.verify() + "\n\nEsportato %s (%d triangoli)" % (path, n)
@@ -714,11 +951,11 @@ def get_editor():
     return ed
 
 
-def start(doc=None, panel=True):
+def start(doc=None, panel=True, dock=True):
     """Apre l'editor sulla mesh selezionata, sulla pelle generata o su una forma nuova."""
     doc = doc or Rhino.RhinoDoc.ActiveDoc
     ed = get_editor()
     session = ed.open(doc)
     if panel:
-        ed.show_panel()
+        ed.show_panel(dock)
     return ed, session

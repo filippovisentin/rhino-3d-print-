@@ -129,6 +129,14 @@ def _s(x):
     return ("%g" % x) if isinstance(x, float) else str(x)
 
 
+def support_overrides(kind="grid", bed_only=False):
+    """Impostazioni di Bambu per i nostri tre tipi di supporto."""
+    tree = kind == "tree"
+    return {"enable_support": "1", "support_type": "tree(auto)" if tree else "normal(auto)",
+            "support_style": {"grid": "grid", "snug": "snug", "tree": "organic"}[kind],
+            "support_on_build_plate_only": "1" if bed_only else "0"}
+
+
 def overrides(params):
     """Impostazioni di processo ricavate dai nostri parametri (stessa ricetta della scheda)."""
     pr = params["print"]
@@ -457,6 +465,9 @@ def main(argv=None):
     ap.add_argument("--support", action="store_true", help="attiva i supporti automatici")
     ap.add_argument("--support-angle", type=float, default=None,
                     help="soglia dei supporti in gradi dall'orizzontale (vuoto = valore del profilo Bambu)")
+    ap.add_argument("--support-type", default="grid", choices=["grid", "snug", "tree"],
+                    help="supporti normali a griglia, normali aderenti o ad albero (organici)")
+    ap.add_argument("--support-bed-only", action="store_true", help="supporti solo dal piano")
     ap.add_argument("--no-spiral", action="store_true", help="vaso a parete normale (per provare i supporti)")
     ap.add_argument("--save", default=None, help="salva il riassunto JSON anche in questo file")
     ap.add_argument("--no-analysis", action="store_true", help="salta l'analisi del G-code (piu veloce)")
@@ -471,7 +482,7 @@ def main(argv=None):
     out = a.out or os.path.join(os.path.dirname(os.path.abspath(a.stl)), "slicer")
     extra = None
     if a.support:
-        extra = {"enable_support": "1", "support_type": "normal(auto)"}
+        extra = support_overrides(a.support_type, a.support_bed_only)
         if a.support_angle is not None:
             extra["support_threshold_angle"] = "%g" % a.support_angle
     res = slice_stl(a.stl, params, out, a.printer, extra, analyse=not a.no_analysis, material=a.material)

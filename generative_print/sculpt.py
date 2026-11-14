@@ -7,7 +7,7 @@ import math
 
 import numpy as np
 
-BRUSHES = ("draw", "inflate", "smooth", "flatten", "pinch", "grab")
+BRUSHES = ("draw", "clay", "inflate", "layer", "crease", "smooth", "flatten", "scrape", "pinch", "grab")
 
 
 def falloff(dist, radius):
@@ -63,42 +63,133 @@ def symmetry_copies(point, vector, count=1, mirror=None, centre=(0.0, 0.0)):
     return out
 
 
+class Topology(object):
+    """Vicinanze della mesh in forma compatta, per lavorare solo sulla zona del pennello:
+    vicini di ogni vertice e facce attorno a ogni vertice."""
+
+    def __init__(self, F, n):
+        F = np.asarray(F)
+        self.n = int(n)
+        e = edge_list(F)
+        i = np.concatenate([e[:, 0], e[:, 1]])
+        j = np.concatenate([e[:, 1], e[:, 0]])
+        self.nbr = j[np.argsort(i, kind="stable")]
+        self.nptr = np.r_[0, np.cumsum(np.bincount(i, minlength=self.n))]
+        fi = F.ravel()
+        self.vf = np.repeat(np.arange(len(F)), 3)[np.argsort(fi, kind="stable")]
+        self.fptr = np.r_[0, np.cumsum(np.bincount(fi, minlength=self.n))]
+
+    @staticmethod
+    def _gather(ptr, data, idx):
+        idx = np.asarray(idx, dtype=np.int64)
+        cnt = ptr[idx + 1] - ptr[idx]
+        owner = np.repeat(np.arange(len(idx)), cnt)
+        flat = np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt) + np.repeat(ptr[idx], cnt)
+        return owner, data[flat], cnt
+
+    def mean(self, V, idx):
+        """Media dei vicini, solo per i vertici idx."""
+        owner, nb, cnt = self._gather(self.nptr, self.nbr, idx)
+        out = np.empty((len(idx), 3))
+        for k in range(3):
+            out[:, k] = np.bincount(owner, weights=V[nb, k], minlength=len(idx))
+        out /= np.maximum(cnt, 1)[:, None]
+        out[cnt == 0] = V[np.asarray(idx)[cnt == 0]]
+        return out
+
+    def faces_of(self, idx):
+        return np.unique(self._gather(self.fptr, self.vf, idx)[1])
+
+    def vertex_normals(self, face_cross, idx):
+        """Normali dei vertici idx dai prodotti vettoriali delle facce (pesate per area)."""
+        owner, fs, _ = self._gather(self.fptr, self.vf, idx)
+        out = np.empty((len(idx), 3))
+        for k in range(3):
+            out[:, k] = np.bincount(owner, weights=face_cross[fs, k], minlength=len(idx))
+        return out / np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-30)
+
+    def connected(self, V, seed, center, radius):
+        """Vertici entro il raggio raggiungibili dal vertice 'seed' camminando sulla superficie:
+        il pennello non salta sull'altro lato di una parete sottile."""
+        inball = ((V - np.asarray(center, dtype=float)) ** 2).sum(axis=1) < radius * radius
+        seen = np.zeros(self.n, dtype=bool)
+        seen[seed] = True
+        front = np.array([seed], dtype=np.int64)
+        while len(front):
+            nb = self._gather(self.nptr, self.nbr, front)[1]
+            nb = np.unique(nb[inball[nb] & ~seen[nb]])
+            seen[nb] = True
+            front = nb
+        seen[seed] = bool(inball[seed])
+        return np.where(seen)[0]
+
+
 def dab(V, normals, edges, center, radius, strength, brush="draw", direction=None,
-        locked=None, grab_delta=None):
+        locked=None, grab_delta=None, topo=None, seed=None, mask=None, base=None):
     """Applica un colpo di pennello in-place. Restituisce gli indici dei vertici mossi.
 
-    strength: spostamento massimo in mm (negativo = scava). Per "smooth" e "flatten"
-    e una frazione 0..1. `direction`: normale media del colpo (per draw/flatten).
+    strength: spostamento massimo in mm (negativo = scava). Per "smooth", "flatten", "pinch" e
+    "scrape" e una frazione 0..1. `direction`: normale media del colpo.
+    topo + seed: lavora solo sulla superficie collegata al vertice seed (Topology.connected).
+    mask: protezione per vertice 0..1 (1 = non si muove). base: posizioni a inizio pennellata
+    (serve al pennello "layer", che non supera un'altezza fissa rispetto a quelle).
     """
     center = np.asarray(center, dtype=float)
-    d = np.linalg.norm(V - center, axis=1)
-    idx = np.where(d < radius)[0]
+    if topo is not None and seed is not None:
+        idx = topo.connected(V, seed, center, radius)
+        dist = np.linalg.norm(V[idx] - center, axis=1)
+    else:
+        d = np.linalg.norm(V - center, axis=1)
+        idx = np.where(d < radius)[0]
+        dist = d[idx]
     if locked is not None and len(idx):
-        idx = idx[~locked[idx]]
+        keep = ~locked[idx]
+        idx, dist = idx[keep], dist[keep]
     if len(idx) == 0:
         return idx
-    w = falloff(d[idx], radius)[:, None]
-    if brush == "draw":
-        if direction is None:
-            direction = normals[idx].mean(axis=0)
-        direction = np.asarray(direction, dtype=float)
-        direction = direction / max(np.linalg.norm(direction), 1e-12)
-        V[idx] += direction * strength * w
-    elif brush == "inflate":
-        V[idx] += normals[idx] * strength * w
-    elif brush == "smooth":
-        mean = neighbor_mean(V, edges)[idx]
-        V[idx] += (mean - V[idx]) * min(abs(strength), 1.0) * w
-    elif brush == "flatten":
+    w = falloff(dist, radius)[:, None]
+    if mask is not None:
+        w = w * (1.0 - np.clip(mask[idx], 0.0, 1.0))[:, None]
+    if brush in ("draw", "flatten", "clay", "crease", "scrape", "layer"):
         if direction is None:
             direction = normals[idx].mean(axis=0)
         direction = np.asarray(direction, dtype=float)
         direction = direction / max(np.linalg.norm(direction), 1e-12)
         origin = (V[idx] * w).sum(axis=0) / max(w.sum(), 1e-12)
         height = (V[idx] - origin).dot(direction)[:, None]
-        V[idx] -= direction * height * min(abs(strength), 1.0) * w
+    frac = min(abs(strength), 1.0)
+    if brush == "draw":
+        V[idx] += direction * strength * w
+    elif brush == "inflate":
+        V[idx] += normals[idx] * strength * w
+    elif brush == "smooth":
+        mean = topo.mean(V, idx) if topo is not None else neighbor_mean(V, edges)[idx]
+        V[idx] += (mean - V[idx]) * frac * w
+    elif brush == "flatten":
+        V[idx] -= direction * height * frac * w
+    elif brush == "clay":                     # riempie fino a un piano poco sopra la superficie
+        level = 0.6 * strength
+        gap = np.clip(level - height, 0.0, None) if strength >= 0 else -np.clip(height - level, 0.0, None)
+        V[idx] += direction * gap * 0.6 * w
+    elif brush == "scrape":                   # abbassa solo le creste (invertito: riempie le valli)
+        part = np.clip(height, 0.0, None) if strength >= 0 else np.clip(height, None, 0.0)
+        V[idx] -= direction * part * frac * w
+    elif brush == "crease":                   # solco netto: scava e stringe verso il centro
+        sharp = w * w
+        to = center - V[idx]
+        to -= to.dot(direction)[:, None] * direction
+        V[idx] += -direction * strength * 0.7 * sharp + to * 0.35 * sharp
+    elif brush == "layer":                    # rilievo ad altezza costante rispetto all'inizio
+        ref = V[idx] if base is None else base[idx]
+        done = (V[idx] - ref).dot(direction)[:, None]
+        cap = abs(strength) * np.clip(2.5 * w, 0.0, 1.0)
+        if strength >= 0:
+            new = np.maximum(done, np.minimum(done + 0.5 * strength * w, cap))
+        else:
+            new = np.minimum(done, np.maximum(done + 0.5 * strength * w, -cap))
+        V[idx] += direction * (new - done)
     elif brush == "pinch":
-        V[idx] += (center - V[idx]) * min(abs(strength), 1.0) * w * 0.5
+        V[idx] += (center - V[idx]) * frac * w * 0.5
     elif brush == "grab":
         V[idx] += np.asarray(grab_delta, dtype=float) * w
     else:

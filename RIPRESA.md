@@ -34,6 +34,31 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 | Specchio Y sulla staffa (centro 30, 20) | 117 punti mossi per lato, simmetrici |
 | Pennellata con e senza «Rispetta il limite» | senza: 50,9° e 60 mm² oltre soglia; con: 42,4° e 0 mm² (43 punti corretti) |
 
+## Sessione del 2026-11-14
+
+- **Supporti come in Bambu Studio** (`generative_print/supports.py`, solo numpy): calcolati dove servono (facce oltre il limite di sbalzo e isole), in tre tipologie scelte dal pannello: «Normali a griglia» (allargati di 1,5 mm), «Normali aderenti», «Ad albero» (punte ogni 5 mm, rami inclinati al massimo di 40 gradi che si uniscono, evitano il pezzo e cercano una via libera fino al piano). Opzione «Supporti solo dal piano». Distanza dal pezzo 0,2 mm, due strati di interfaccia. Nella vista: rami ombreggiati o colonne; con «Strati» acceso, i tratti dello strato corrente (linee di base, interfaccia fitta, sezioni dei rami). Il tipo scelto viene passato anche a Bambu (`--support-type`, `--support-bed-only`).
+- **Pannelli agganciati** (`rhino/gp_panel.py`): slicer ed editor si aprono come schede nella colonna dei Livelli, non piu come finestre in mezzo allo schermo. Alias di Rhino creati: `GPSlicer` e `GPEditor` (lanciano `rhino/avvia_slicer.py` e `rhino/avvia_editor.py`).
+- **Modifica plastica rifatta** (`rhino/gp_editor.py`, `generative_print/sculpt.py`):
+  - a ogni colpo si aggiornano solo le facce e le normali toccate;
+  - «Solo la superficie toccata»: il pennello non passa sull'altro lato di una parete sottile;
+  - Annulla e Ripeti (60 passi, registrano solo i punti cambiati);
+  - Maschera: pennello che protegge una zona, con Cancella e Inverti;
+  - pennelli nuovi: Argilla, Strato, Piega, Raschia (oltre a Tira/Spingi, Gonfia, Liscia, Appiattisci, Pizzica, Afferra);
+  - Ctrl+Shift e trascina: raggio (orizzontale) e forza (verticale); il cerchio interno del cursore mostra la forza.
+
+Prove eseguite il 2026-11-14 (oggetto `prova_tavolo`: piano 60 x 60 x 5 mm su una gamba 10 x 10 x 30, piu una mensola 20 x 60 x 4 sotto un lato):
+
+| Misura | Risultato |
+|---|---|
+| Supporti aderenti | 3500 celle da 1 mm2 = area del piano meno la gamba; 13,8 cm3 stimati; 34 % poggia sulla mensola |
+| Supporti a griglia | 3996 mm2 sostenuti, 15,9 cm3 stimati |
+| Supporti ad albero | 168 punte, 10 tronchi sul piano, 2 rami sul pezzo, 8,3 cm3 stimati; calcolo 0,28 s |
+| Bambu Studio sullo stesso pezzo, supporti ad albero (A1 mini) | 28,6 g, 1 h 45 min; nostra stima 27,0 g e 1,0 h (il tempo nostro è sottostimato) |
+| Colpo di pennello su 40.962 vertici | 7,8 ms (versione precedente, stessa mesh e stessi colpi: 30,1 ms) |
+| Annulla di 9 pennellate, poi Ripeti | forma iniziale ritrovata, poi forma finale ritrovata |
+| Maschera | Inverti e Annulla provati; i punti protetti non si muovono (test `tests/test_sculpt.py`) |
+| Pannelli | scheda nella barra dei Livelli (266 px), passaggio a un'altra scheda senza perdere la sessione, chiusura della scheda che chiude la sessione, comando `GPSlicer` eseguito |
+
 ## Limiti noti (non nascondere)
 
 - Pareti e riempimento della vista sono un'**anteprima geometrica**, non un percorso di stampa: niente G-code nostro, niente ordine dei tratti, niente ritrazioni. Peso e tempo precisi li dà Bambu.
@@ -41,7 +66,9 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 - Il pulsante Bambu passa il materiale scelto solo se esiste il profilo per quella stampante (PETG, ABS e ASA mancano sulla A1 mini): altrimenti usa il PLA e lo scrive nel rapporto. Si affetta sempre sul piatto PEI ruvido, perché il Cool Plate rifiuta il PETG (codice -61). Provato: PETG su X1 Carbon, staffa 23,7 g, 1 h 11 min.
 - Con i supporti spenti Bambu affetta lo stesso anche un pezzo che ne avrebbe bisogno (la staffa): l'avviso è nel nostro rapporto, non nel suo.
 - La maglia per scolpire arrotonda leggermente gli spigoli vivi e ha qualche irregolarità sui bordi (visto sulla staffa a 1,5 mm di lato).
-- I supporti in anteprima sono colonne verticali su una griglia: non il disegno vero dei supporti (ad albero o a griglia) dello slicer.
+- I supporti sono un'anteprima e una stima: dicono dove vanno e quanto materiale serve circa, non sono i percorsi che stampera Bambu. Il peso dei supporti normali usa una densita ipotizzata (13 % piu interfaccia all'80 %); quello dell'albero un guscio di una linea. Non c'e ancora la distanza orizzontale dal pezzo ne la pittura manuale (forza / vieta).
+- L'albero evita il pezzo guardando un passo alla volta: sotto un ostacolo largo un ramo puo finire appoggiato sul pezzo anche con «solo dal piano» (il rapporto dice quanti).
+- I pennelli nuovi, l'annulla/ripeti e la maschera sono stati provati da script e disegnando il pannello in memoria, **non con il mouse** (compreso Ctrl+Shift per raggio e forza).
 - «Migliore» prova solo i sei assi e le facce piane grandi: su forme organiche può esistere un orientamento migliore inclinato.
 - «Rispetta il limite» liscia: su pennellate molto profonde può appiattire parte del gesto; se non riesce a rientrare lo dice nello stato.
 - La finestra è stata controllata disegnandola in memoria e leggendone i valori da script; **cursori e pulsanti non sono stati provati con il mouse** (nemmeno i nuovi pulsanti di orientamento).
@@ -50,16 +77,16 @@ Prove eseguite (oggetto `prova_staffa`, una staffa 60 × 40 × 58 mm con foro e 
 ## Prossimi passi proposti
 
 1. Provare la finestra a mano (mouse) e correggere ciò che non torna.
-2. Modifica plastica: suddivisione dove serve dettaglio, spigoli vivi conservati nella maglia da scolpire, pennello che corregge anche gli sbalzi già presenti (oggi tocca solo la zona scolpita).
+2. Supporti: pittura manuale (forza / vieta), distanza orizzontale dal pezzo, confronto del peso con Bambu su piu pezzi.
+2b. Modifica plastica: suddivisione dove serve dettaglio, spigoli vivi conservati nella maglia da scolpire, pennello che corregge anche gli sbalzi già presenti (oggi tocca solo la zona scolpita).
 3. Strati pieni locali (superfici piane a metà altezza) nell'anteprima.
 4. Scala e disposizione sul piatto: oggi il rapporto dice solo di quanto ridurre («andrebbe ridotto al NN %»), non scala né dispone più pezzi.
-5. Comando con nome in Rhino (alias `GPSlicer`): tocca le impostazioni di Rhino dell'utente, quindi chiedere prima.
 6. Aggiornare o togliere `PIANO.md`.
 
 ## Come ripartire
 
 1. Rhino 8 si avvia con `Rhino.exe /nosplash /runscript="_MCPStart"` (l'avvio automatico del router fallisce).
-2. In Rhino: selezionare un oggetto, `_ScriptEditor`, aprire `rhino/avvia_slicer.py`, F5.
+2. In Rhino: selezionare un oggetto e scrivere `GPSlicer` (oppure `GPEditor` per scolpire). Senza alias: `_ScriptEditor`, aprire `rhino/avvia_slicer.py`, F5.
 3. Da script (MCP): rimettere ogni volta la cartella del progetto in `sys.path`; `gp_slicer.start(doc)`, poi `sl.set(walls=3, infill=0.2)`, `sl.set_layer(100)`, `sl.thickness()`, `sl.best_orientation()`, `sl.rotate_by("x")`, `sl.apply_orientation()`, `sl.bambu_start()` e `sl.bambu_poll()`.
 4. Nel documento di Rhino lasciato aperto c'è `prova_staffa` con lo slicer aperto sopra.
 
