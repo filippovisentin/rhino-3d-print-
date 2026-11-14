@@ -1,6 +1,6 @@
 # Prossimi passi
 
-Scritto il 2026-11-14. Obiettivo: lo slicer dentro Rhino scrive da solo il **G-code pronto da stampare** per la Bambu Lab A1 mini, senza usare Bambu Studio. Il pulsante «Affetta con Bambu» resta solo come confronto facoltativo.
+Scritto il 2026-11-14, aggiornato il 2026-11-15. Obiettivo: lo slicer dentro Rhino scrive da solo il **G-code pronto da stampare** per la Bambu Lab A1 mini, senza usare Bambu Studio. Il pulsante «Affetta con Bambu» resta solo come confronto facoltativo.
 
 Per lo stato completo e le prove già fatte: `RIPRESA.md`. Per le decisioni stabili: `CLAUDE.md`.
 
@@ -13,11 +13,21 @@ Per lo stato completo e le prove già fatte: `RIPRESA.md`. Per le decisioni stab
 | Pannelli agganciati accanto ai Livelli, alias `GPSlicer` e `GPEditor` | fatto |
 | Modifica plastica (pennelli, maschera, annulla/ripeti) | fatto, non provata col mouse |
 | Avvio e fine stampa della A1 mini (`generative_print/machine.py`) | fatto e provato sui profili veri |
+| Scrittura del G-code (`generative_print/gcode.py`) e suo controllo | fatto, provato su un cubo |
+| Interfaccia dei pannelli in inglese | fatto |
 | Percorsi veri di tutti gli strati | **da fare** |
-| Scrittura del G-code | **da fare** |
 | Prima stampa vera | **da fare** |
 
-## Passo 1 — Scrittura del G-code (nucleo, fuori da Rhino)
+## Passo 1 — Scrittura del G-code (nucleo, fuori da Rhino) — FATTO il 2026-11-15
+
+Risultato: cubo pieno da 20 mm con i profili veri della A1 mini (PLA): 9,69 g contro 9,88 g calcolati a mano (-1,9 %), 100 strati, controllo superato. Come si usa dal passo 2:
+- `gcode.generate(strati, stampante, materiale, impostazioni)` restituisce testo, peso, tempo e l'esito di `gcode.check`;
+- le linee affiancate vanno messe a distanza `gcode.spacing(larghezza, h)` (0,407 mm per 0,45 / 0,2), non alla larghezza: cosi il pieno e pieno davvero;
+- i punti dei percorsi sono gia nelle coordinate del piatto (pezzo centrato su 90, 90);
+- il controllo guarda solo il nostro corpo (tra `; GP_BODY_START` e `; GP_BODY_END`): l'avvio ufficiale esce apposta dal piatto;
+- non ancora fatti: giunzione delle righe di riempimento con estrusione, pulitura a fine percorso (wipe), posizione scelta della cucitura, rallentamento per strati piccoli. Il tempo e una stima (non conta i rallentamenti in curva).
+
+Descrizione originale del passo:
 
 File nuovo: `generative_print/gcode.py`, solo numpy, con i suoi test in `tests/test_gcode.py`.
 
@@ -71,5 +81,6 @@ Fatto quando: la staffa di prova produce un file completo e l'anteprima a strati
 - Bambu Studio deve restare installato: avvio e fine stampa si leggono dai suoi profili (`C:\Program Files\Bambu Studio\resources\profiles\BBL`). Non copiarli nel progetto: sono sotto la licenza di Bambu.
 - Il G-code prodotto dalla riga di comando di Bambu **non è stampabile** (avvio generico, spurgo fuori dal piatto): vale solo per i confronti.
 - Rhino si avvia con `Rhino.exe /nosplash /runscript="_MCPStart"`.
-- Test: `.venv/Scripts/python -m pytest -q tests` (63 test).
+- Test: `.venv/Scripts/python -m pytest -q tests` (70 test).
+- Interfaccia dei pannelli in inglese; documenti e commenti in italiano.
 - I file lunghi con triple virgolette vanno scritti su file e poi eseguiti: la shell non li accetta in linea.
