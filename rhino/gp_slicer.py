@@ -45,12 +45,22 @@ WALL_COLORS = [(235, 95, 25), (245, 170, 40), (250, 205, 90)]      # esterna, in
 INFILL_COLOR = (60, 140, 215)
 SUPPORT_COLOR = (40, 160, 90)
 SUPPORT_FACE_COLOR = (20, 110, 60)
+PAINT_MODES = [(None, "Spenta"), (1, "Forza i supporti"), (-1, "Vieta i supporti"), (0, "Cancella")]
+PAINT_COLORS = {1: (55, 110, 230), -1: (95, 70, 110)}
 SUPPORT_TYPES = [(None, "Nessuno"), ("grid", "Normali a griglia"), ("snug", "Normali aderenti"),
                  ("tree", "Ad albero")]
 
 
 def int_array(values):
-    return System.Array[System.Int32](np.asarray(values, dtype=np.int32).tolist())
+    """Array di interi .NET da numpy, copiando la memoria in blocco."""
+    a = np.ascontiguousarray(values, dtype=np.int32)
+    out = System.Array.CreateInstance(System.Int32, len(a))
+    if len(a):
+        try:
+            System.Runtime.InteropServices.Marshal.Copy(System.IntPtr(System.Int64(a.ctypes.data)), out, 0, len(a))
+        except Exception:
+            return System.Array[System.Int32](a.tolist())
+    return out
 
 
 def mesh_from_geometry(geo):
@@ -63,7 +73,12 @@ def mesh_from_geometry(geo):
         brep = geo if isinstance(geo, rg.Brep) else (geo.ToBrep() if hasattr(geo, "ToBrep") else None)
         if brep is None:
             return None
-        parts = rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.QualityRenderMesh)
+        mp = rg.MeshingParameters.QualityRenderMesh
+        # triangoli non troppo grandi: la pittura dei supporti lavora per faccia
+        mp.MaximumEdgeLength = max(2.0, brep.GetBoundingBox(False).Diagonal.Length / 80.0)
+        mp.SimplePlanes = False
+        mp.RefineGrid = True
+        parts = rg.Mesh.CreateFromBrep(brep, mp)
         if not parts:
             return None
         m = rg.Mesh()
@@ -125,6 +140,7 @@ class Job(object):
         self.V0, self.F = gp_rhino.from_rhino_mesh(joined)        # come disegnato
         if len(self.F) == 0:
             raise ValueError("Nessuna geometria stampabile negli oggetti scelti")
+        self.paint = np.zeros(len(self.F), dtype=np.int8)     # supporti dipinti: +1 forza, -1 vieta
         self.orient(np.eye(3))
 
     def orient(self, R):
@@ -139,6 +155,9 @@ class Job(object):
         self.Vw = self.V - np.array([0.0, 0.0, self.z0])          # appoggiato al piano
         c = (self.V.max(axis=0) + self.V.min(axis=0)) / 2.0
         self.centre = (float(c[0]), float(c[1]))
+        T = self.V[self.F]
+        self.face_centre = T.mean(axis=1)
+        self.face_normal = checks.face_normals_areas(self.V, self.F)[0]
         zmax = self.Vw[:, 2][self.F].max(axis=1)                  # facce ordinate per quota massima:
         self.zorder = np.argsort(zmax, kind="stable")             # il pezzo 'gia stampato' sotto uno strato
         self.zsorted = zmax[self.zorder]                          # e un prefisso di questo elenco
@@ -202,14 +221,86 @@ class Conduit(Rhino.Display.DisplayConduit):
                     e.Display.DrawLines(j.infill, sd.Color.FromArgb(*INFILL_COLOR), 1)
                 for pl in j.open_loops:
                     e.Display.DrawPolyline(pl, sd.Color.FromArgb(215, 45, 40), 4)
-            elif sl.heat and j.face_sets is not None:
-                for faces, mat in zip(j.face_sets, (sl.mat, sl.mat_warn, sl.mat_over)):
+            elif j.face_sets is not None:
+                heat = (sl.mat, sl.mat_warn, sl.mat_over) if sl.heat else (sl.mat, sl.mat, sl.mat)
+                for faces, mat in zip(j.face_sets, heat + (sl.mat_force, sl.mat_block)):
                     if faces.Length:
                         e.Display.DrawMeshShaded(j.show, mat, faces)
             else:
                 e.Display.DrawMeshShaded(j.show, sl.mat)
+            if sl.paint_cursor is not None and sl.paint_mode is not None and not sl.layer_on:
+                p, n = sl.paint_cursor
+                col = PAINT_COLORS.get(sl.paint_mode, (120, 120, 120))
+                e.Display.DrawCircle(rg.Circle(rg.Plane(rg.Point3d(p[0], p[1], p[2]),
+                                                        rg.Vector3d(n[0], n[1], n[2])), sl.paint_radius),
+                                     sd.Color.FromArgb(*col), 2)
         except Exception:
             sl.fail()
+
+
+class PaintMouse(Rhino.UI.MouseCallback):
+    """Pittura dei supporti col mouse: trascina col sinistro sul pezzo (Ctrl: cancella)."""
+
+    def __init__(self, owner):
+        super().__init__()
+        self.sl = owner
+        self.down = False
+
+    def _hit(self, e):
+        sl = self.sl
+        j = sl.job
+        if j is None or sl.paint_mode is None or sl.layer_on or e.View is None:
+            return None
+        line = e.View.ActiveViewport.ClientToWorld(e.ViewportPoint)
+        d = line.From - line.To
+        d.Unitize()
+        t = rg.Intersect.Intersection.MeshRay(j.mesh, rg.Ray3d(line.To, d))
+        if t < 0:
+            return None
+        p = line.To + d * t
+        return np.array([p.X, p.Y, p.Z]), sl.face_at(p)
+
+    def OnMouseDown(self, e):
+        try:
+            if e.MouseButton != Rhino.UI.MouseButton.Left:
+                return
+            hit = self._hit(e)
+            if hit is None:
+                return
+            e.Cancel = True
+            self.down = True
+            self.sl.paint_at(hit[0], hit[1], erase=bool(e.CtrlKeyDown))
+            e.View.Redraw()
+        except Exception:
+            self.sl.fail()
+
+    def OnMouseMove(self, e):
+        try:
+            sl = self.sl
+            if sl.job is None or sl.paint_mode is None:
+                return
+            hit = self._hit(e)
+            if hit is None:
+                if sl.paint_cursor is not None:
+                    sl.paint_cursor = None
+                    e.View.Redraw()
+                return
+            n = sl.job.face_normal[hit[1]] if hit[1] is not None else np.array([0.0, 0.0, 1.0])
+            sl.paint_cursor = (hit[0], n)
+            if self.down:
+                sl.paint_at(hit[0], hit[1], erase=bool(e.CtrlKeyDown))
+            e.View.Redraw()
+        except Exception:
+            self.sl.fail()
+
+    def OnMouseUp(self, e):
+        try:
+            if self.down:
+                self.down = False
+                e.Cancel = True
+                self.sl.guard(self.sl.analyse)          # i supporti si ricalcolano a fine pennellata
+        except Exception:
+            self.sl.fail()
 
 
 class Slicer(object):
@@ -238,11 +329,17 @@ class Slicer(object):
             return m
         self.mat, self.mat_warn, self.mat_over = mat(CLAY), mat((240, 175, 50)), mat((215, 45, 40))
         self.mat_sup = mat(SUPPORT_COLOR)
+        self.mat_force, self.mat_block = mat(PAINT_COLORS[1]), mat(PAINT_COLORS[-1])
+        self.paint_mode = None        # None = spenta, 1 forza, -1 vieta, 0 cancella
+        self.paint_radius = 6.0
+        self.paint_cursor = None
+        self.mouse = PaintMouse(self)
         self.docked = False
 
     def fail(self):
         self.error = traceback.format_exc()
         self.conduit.Enabled = False
+        self.mouse.Enabled = False
         Rhino.RhinoApp.WriteLine("Generative Print: errore nello slicer\n" + self.error)
 
     # ----------------------------------------------------------- oggetti
@@ -267,12 +364,14 @@ class Slicer(object):
         self.extra = []
         self.layer_index = 0
         self.conduit.Enabled = True
+        self.mouse.Enabled = self.paint_mode is not None
         self.analyse()
         return self.job
 
     def close(self, close_form=True):
         j, self.job = self.job, None
         self.conduit.Enabled = False
+        self.mouse.Enabled = False
         self.result = None
         if j is not None:
             for oid in j.obj_ids:
@@ -302,12 +401,10 @@ class Slicer(object):
         if j is None:
             self.refresh()
             return None
-        res = printcheck.analyse(j.Vw, j.F, self.settings)
+        res = printcheck.analyse(j.Vw, j.F, self.settings, support_paint=j.paint if j.paint.any() else None)
         j.support, j.sup_mesh = res.get("support"), None
-        over, warn = res["over_mask"], res["warn_mask"]
-        j.face_sets = (int_array(np.where(~over & ~warn)[0]), int_array(np.where(warn)[0]),
-                       int_array(np.where(over)[0]))
         self.result = res
+        self._face_sets()
         if self.layer_on:
             self.set_layer(self.layer_index)
         else:
@@ -353,6 +450,46 @@ class Slicer(object):
         j.doc.Views.Redraw()
         return {"index": index, "layers": n, "z": zw, "loops": len(closed), "walls": len(walls),
                 "wall_mm": wall_len, "infill_mm": fill_len, "solid": solid, "open": len(j.open_loops)}
+
+    def _face_sets(self):
+        """Elenchi di facce per il disegno: ok, vicine alla soglia, oltre soglia, supporti forzati,
+        supporti vietati (la pittura copre la mappa degli sbalzi)."""
+        j, res = self.job, self.result
+        over, warn, free = res["over_mask"], res["warn_mask"], j.paint == 0
+        j.face_sets = tuple(int_array(np.where(m)[0]) for m in (
+            ~over & ~warn & free, warn & free, over & free, j.paint > 0, j.paint < 0))
+
+    def face_at(self, point):
+        """Indice della faccia del pezzo sotto un punto della superficie (None se non si trova)."""
+        mp = self.job.mesh.ClosestMeshPoint(rg.Point3d(float(point[0]), float(point[1]), float(point[2])), 0.5)
+        return int(mp.FaceIndex) if mp is not None and mp.FaceIndex >= 0 else None
+
+    def paint_at(self, point, face=None, erase=False, mode=None, radius=None):
+        """Dipinge i supporti attorno a un punto del pezzo (coordinate del modello): le facce entro
+        il raggio rivolte dallo stesso lato della faccia toccata. Restituisce quante facce cambia."""
+        j = self.job
+        mode = self.paint_mode if mode is None else mode
+        if j is None or mode is None:
+            return 0
+        r = float(radius or self.paint_radius)
+        near = ((j.face_centre - np.asarray(point, dtype=float)) ** 2).sum(axis=1) < r * r
+        if face is None:
+            face = self.face_at(point)
+        if face is not None:
+            near[face] = True
+            near &= (j.face_normal @ j.face_normal[face]) > 0.0
+        value = 0 if erase else int(mode)
+        changed = int((j.paint[near] != value).sum())
+        if changed:
+            j.paint[near] = value
+            if self.result is not None:
+                self._face_sets()
+        return changed
+
+    def clear_paint(self):
+        if self.job is not None and self.job.paint.any():
+            self.job.paint[:] = 0
+            self.analyse()
 
     def _support_draw(self):
         """Prepara cio che la vista disegna dei supporti: tutto, oppure fino allo strato corrente
@@ -557,6 +694,9 @@ class Slicer(object):
         self.proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, creationflags=0x08000000)
         self.t0 = time.time()
+        if j.paint.any():
+            self.extra.append("Nota: la pittura dei supporti vale per la nostra anteprima; a Bambu non viene "
+                              "passata (lui li mette in automatico).")
         if self.timer is not None:
             self.timer.Start()
         self.bambu_poll()
@@ -741,6 +881,18 @@ class Slicer(object):
         kinds = [text for _, text in SUPPORT_TYPES]
         self.w_sup = dropdown(kinds, dict(SUPPORT_TYPES)[s["support_type"]] if s["supports"] else kinds[0])
         self.w_bed = check("Supporti solo dal piano", bool(s["support_bed_only"]), self.on_settings)
+        modes = [text for _, text in PAINT_MODES]
+        self.w_paint = ef.DropDown()
+        for text in modes:
+            self.w_paint.Items.Add(text)
+        self.w_paint.SelectedIndex = [m for m, _ in PAINT_MODES].index(self.paint_mode)
+        self.w_paint.SelectedIndexChanged += lambda s_, e: self.guard(self.on_paint)
+        self.w_paint.ToolTip = ("Trascina col tasto sinistro sul pezzo: blu = supporto forzato, viola = vietato. "
+                                "Ctrl cancella. I supporti si ricalcolano quando rilasci.")
+        self.w_paint_r = ef.Slider()
+        self.w_paint_r.MinValue, self.w_paint_r.MaxValue, self.w_paint_r.Value = 1, 30, int(self.paint_radius)
+        self.w_paint_r.ValueChanged += lambda s_, e: self.guard(self.on_paint)
+        self.w_paint_l = label("Raggio %d mm" % self.paint_radius)
         self.w_heat = check("Mappa degli sbalzi", self.heat, self.on_view)
         self.w_heat.ToolTip = "Arancio = vicino alla soglia, rosso = oltre"
         self.w_layers = check("Strati", self.layer_on, self.on_view)
@@ -769,6 +921,8 @@ class Slicer(object):
         lay.AddRow(title("Supporti"))
         lay.AddRow(table([(label("Tipo"), self.w_sup)]))
         lay.AddRow(self.w_bed)
+        lay.AddRow(table([(label("Pittura"), self.w_paint), (self.w_paint_l, self.w_paint_r)]))
+        lay.AddRow(button("Cancella la pittura", self.clear_paint, "Torna ai supporti automatici"))
         lay.AddRow(title("Vista"))
         lay.AddRow(self.w_heat)
         lay.AddRow(table([(self.w_layers, self.w_layer)]))
@@ -843,6 +997,17 @@ class Slicer(object):
             s["support_type"] = kind
         s["support_bed_only"] = bool(self.w_bed.Checked)
         self.analyse()
+
+    def on_paint(self):
+        self.paint_mode = PAINT_MODES[max(0, self.w_paint.SelectedIndex)][0]
+        self.paint_radius = float(self.w_paint_r.Value)
+        self.w_paint_l.Text = "Raggio %d mm" % self.paint_radius
+        self.paint_cursor = None
+        self.mouse.Enabled = self.paint_mode is not None and self.job is not None
+        if self.paint_mode in (1, -1) and not self.settings["supports"] and self.w_sup.SelectedIndex == 0:
+            self.w_sup.SelectedIndex = 1          # dipingere ha senso solo con i supporti accesi
+        if self.job is not None:
+            self.job.doc.Views.Redraw()
 
     def on_view(self):
         self.heat = bool(self.w_heat.Checked)

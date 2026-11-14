@@ -382,6 +382,16 @@ def tree_mesh(segs, sides=8):
     return V, F
 
 
+def apply_paint(over_mask, paint):
+    """Pittura manuale dei supporti, per faccia: +1 = forza (supporto anche se lo sbalzo e sotto
+    soglia), -1 = vieta (niente supporto anche se servirebbe), 0 = automatico."""
+    over = np.asarray(over_mask, dtype=bool)
+    if paint is None:
+        return over
+    paint = np.asarray(paint)
+    return (over | (paint > 0)) & ~(paint < 0)
+
+
 # ---------------------------------------------------------------- ingresso unico
 def generate(V, F, over_mask, s=None, island_points=None, res=None):
     """Calcola i supporti dove servono. s: impostazioni (vedi DEFAULTS, piu layer e line_width).

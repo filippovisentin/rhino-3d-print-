@@ -54,6 +54,8 @@ Prove eseguite il 2026-11-14 (oggetto `prova_tavolo`: piano 60 x 60 x 5 mm su un
 | Supporti a griglia | 3996 mm2 sostenuti, 15,9 cm3 stimati |
 | Supporti ad albero | 168 punte, 10 tronchi sul piano, 2 rami sul pezzo, 8,3 cm3 stimati; calcolo 0,28 s |
 | Bambu Studio sullo stesso pezzo, supporti ad albero (A1 mini) | 28,6 g, 1 h 45 min; nostra stima 27,0 g e 1,0 h (il tempo nostro è sottostimato) |
+| Pittura dei supporti: «vieta» con raggio 10 mm sotto il piano | 583 facce, 316 mm2 vietati (cerchio teorico 314), colonne da 3500 a 3186, nessuna faccia del lato sopra toccata; il rapporto segna «VIETATI senza supporto» |
+| Pittura: «forza» con raggio 4 mm nello stesso punto | 98 facce, tornano 32 colonne entro 3 mm dal centro |
 | Colpo di pennello su 40.962 vertici | 7,8 ms (versione precedente, stessa mesh e stessi colpi: 30,1 ms) |
 | Annulla di 9 pennellate, poi Ripeti | forma iniziale ritrovata, poi forma finale ritrovata |
 | Maschera | Inverti e Annulla provati; i punti protetti non si muovono (test `tests/test_sculpt.py`) |
@@ -66,7 +68,8 @@ Prove eseguite il 2026-11-14 (oggetto `prova_tavolo`: piano 60 x 60 x 5 mm su un
 - Il pulsante Bambu passa il materiale scelto solo se esiste il profilo per quella stampante (PETG, ABS e ASA mancano sulla A1 mini): altrimenti usa il PLA e lo scrive nel rapporto. Si affetta sempre sul piatto PEI ruvido, perché il Cool Plate rifiuta il PETG (codice -61). Provato: PETG su X1 Carbon, staffa 23,7 g, 1 h 11 min.
 - Con i supporti spenti Bambu affetta lo stesso anche un pezzo che ne avrebbe bisogno (la staffa): l'avviso è nel nostro rapporto, non nel suo.
 - La maglia per scolpire arrotonda leggermente gli spigoli vivi e ha qualche irregolarità sui bordi (visto sulla staffa a 1,5 mm di lato).
-- I supporti sono un'anteprima e una stima: dicono dove vanno e quanto materiale serve circa, non sono i percorsi che stampera Bambu. Il peso dei supporti normali usa una densita ipotizzata (13 % piu interfaccia all'80 %); quello dell'albero un guscio di una linea. Non c'e ancora la distanza orizzontale dal pezzo ne la pittura manuale (forza / vieta).
+- I supporti sono un'anteprima e una stima: dicono dove vanno e quanto materiale serve circa, non sono i percorsi che stampera Bambu. Il peso dei supporti normali usa una densita ipotizzata (13 % piu interfaccia all'80 %); quello dell'albero un guscio di una linea. Non c'e ancora la distanza orizzontale dal pezzo.
+- **Pittura dei supporti** (pannello, sezione Supporti: Forza / Vieta / Cancella, raggio, «Cancella la pittura»): si trascina col sinistro sul pezzo, Ctrl cancella; blu = forzato, viola = vietato; i supporti si ricalcolano al rilascio. Lavora per faccia, sulle facce rivolte dallo stesso lato di quella toccata. Vale solo per la nostra anteprima: a Bambu (riga di comando, STL) non viene passata. Provata da script con le stesse funzioni che usa il mouse, **non con il mouse**.
 - L'albero evita il pezzo guardando un passo alla volta: sotto un ostacolo largo un ramo puo finire appoggiato sul pezzo anche con «solo dal piano» (il rapporto dice quanti).
 - I pennelli nuovi, l'annulla/ripeti e la maschera sono stati provati da script e disegnando il pannello in memoria, **non con il mouse** (compreso Ctrl+Shift per raggio e forza).
 - «Migliore» prova solo i sei assi e le facce piane grandi: su forme organiche può esistere un orientamento migliore inclinato.
@@ -77,7 +80,7 @@ Prove eseguite il 2026-11-14 (oggetto `prova_tavolo`: piano 60 x 60 x 5 mm su un
 ## Prossimi passi proposti
 
 1. Provare la finestra a mano (mouse) e correggere ciò che non torna.
-2. Supporti: pittura manuale (forza / vieta), distanza orizzontale dal pezzo, confronto del peso con Bambu su piu pezzi.
+2. Supporti: passare la pittura a Bambu (serve un 3MF al posto dell'STL), distanza orizzontale dal pezzo, confronto del peso con Bambu su piu pezzi.
 2b. Modifica plastica: suddivisione dove serve dettaglio, spigoli vivi conservati nella maglia da scolpire, pennello che corregge anche gli sbalzi già presenti (oggi tocca solo la zona scolpita).
 3. Strati pieni locali (superfici piane a metà altezza) nell'anteprima.
 4. Scala e disposizione sul piatto: oggi il rapporto dice solo di quanto ridurre («andrebbe ridotto al NN %»), non scala né dispone più pezzi.

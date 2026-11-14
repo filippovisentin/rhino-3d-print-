@@ -92,9 +92,10 @@ def support_columns(V, F, over_mask, raycast, spacing=3.0):
     return np.c_[P, bottom]
 
 
-def analyse(V, F, over=None, raycast=None):
+def analyse(V, F, over=None, raycast=None, support_paint=None):
     """Con i supporti attivi li genera dove servono (generative_print.supports): tipo scelto con
-    settings["support_type"]. raycast non serve piu: resta per compatibilita."""
+    settings["support_type"]. raycast non serve piu: resta per compatibilita.
+    support_paint: pittura manuale per faccia (+1 forza, -1 vieta), vedi supports.apply_paint."""
     s = settings(over)
     V = np.asarray(V, dtype=float)
     lift = float(V[:, 2].min())
@@ -119,17 +120,23 @@ def analyse(V, F, over=None, raycast=None):
     contact = float(areas[on_bed].sum())
     needs_support = over_area > 1.0 or islands > 0
     sup_on = bool(s["supports"])
+    paint = None if support_paint is None else np.asarray(support_paint)
+    forced = float(areas[paint > 0].sum()) if paint is not None else 0.0
+    blocked = float(areas[paint < 0].sum()) if paint is not None else 0.0
+    bare = float(areas[over_mask & (paint < 0)].sum()) if paint is not None else 0.0   # sbalzo lasciato senza
 
     rows = [("Mesh chiusa", closed, "%d spigoli aperti, %d corpi" % (topo["naked_edges"], topo["bodies"])),
             ("Ingombro", bool(fits), "%.1f x %.1f x %.1f mm (stampante %g x %g x %g)" % (tuple(size) + tuple(bed))),
-            ("Sbalzi", (not over_area > 1.0) or sup_on,
-             "max %.1f gradi (limite %g), %.0f mm2 oltre%s" % (max_deg, lim, over_area,
-                                                              "  -> con supporti" if over_area > 1.0 and sup_on else "")),
+            ("Sbalzi", (not over_area > 1.0) or (sup_on and bare <= 1.0),
+             "max %.1f gradi (limite %g), %.0f mm2 oltre%s%s"
+             % (max_deg, lim, over_area, "  -> con supporti" if over_area > 1.0 and sup_on else "",
+                (", %.0f mm2 VIETATI senza supporto" % bare) if sup_on and bare > 1.0 else "")),
             ("Isole", islands == 0 or sup_on, "%d partenze nel vuoto" % islands),
             ("Appoggio", contact >= 100.0, "%.0f mm2 sul piano" % contact)]
     out = {"settings": s, "lift_mm": lift, "fit_scale": float(fit_scale), "size": [float(x) for x in size], "closed": closed, "fits": bool(fits),
            "overhang_max_deg": max_deg, "overhang_area_mm2": over_area, "islands": islands,
            "contact_mm2": contact, "needs_support": bool(needs_support),
+           "paint_forced_mm2": forced, "paint_blocked_mm2": blocked,
            "over_mask": over_mask, "warn_mask": warn_mask,
            "layers": int(math.ceil(float(size[2]) / float(s["layer"])))}
     if closed:
@@ -137,8 +144,11 @@ def analyse(V, F, over=None, raycast=None):
         rows.append(("Stabilita", st["margin_mm"] > 0, "baricentro a %.1f mm dal bordo dell'appoggio" % st["margin_mm"]))
         vol, ext = material(V, F, s)
         sup = 0.0
-        if sup_on and needs_support:
-            sp = supports.generate(V, F, over_mask, s, island_points=V[checks.local_minima(V, F)])
+        if sup_on and (needs_support or forced > 0):
+            isl = checks.local_minima(V, F)
+            if paint is not None:                    # un'isola dentro una zona vietata resta senza
+                isl = isl[~np.isin(isl, np.unique(F[paint < 0]))]
+            sp = supports.generate(V, F, supports.apply_paint(over_mask, paint), s, island_points=V[isl])
             out["support"] = sp
             out["support_columns"] = sp["columns"]
             sup = sp["volume_mm3"]
@@ -168,6 +178,10 @@ def report(res):
                  % (res["mass_g"], res["filament_m"], res["time_h"]))
         if res.get("support") is not None:
             L.append(supports.describe(res["support"]))
+        if res.get("paint_forced_mm2", 0) > 0 or res.get("paint_blocked_mm2", 0) > 0:
+            L.append("Pittura dei supporti: %.0f mm2 forzati, %.0f mm2 vietati%s"
+                     % (res["paint_forced_mm2"], res["paint_blocked_mm2"],
+                        "" if s["supports"] else " (accendi i supporti per usarla)"))
     else:
         L.append("Mesh aperta: volume, peso e tempo non calcolabili. Chiudi il solido.")
     if not res["fits"]:

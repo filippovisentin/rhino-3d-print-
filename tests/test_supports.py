@@ -106,3 +106,39 @@ def test_analyse_uses_the_chosen_support_type():
         assert res["support"]["type"] == kind and res["support_cm3"] > 0
         assert "Supporti" in printcheck.report(res)
     assert "support" not in printcheck.analyse(*box(20, 20, 20), over={"supports": True})
+
+
+def funnel():
+    """Tronco di piramide rovesciato: base 20 x 20 a terra, pareti inclinate di 30 gradi (sotto soglia)."""
+    h, e = 20.0, 20.0 * np.tan(np.radians(30.0))
+    V = np.array([[0, 0, 0], [20, 0, 0], [20, 20, 0], [0, 20, 0],
+                  [-e, -e, h], [20 + e, -e, h], [20 + e, 20 + e, h], [-e, 20 + e, h]], dtype=float)
+    F = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
+                  [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
+    return V, F
+
+
+def test_painting_forces_supports_where_none_are_needed():
+    V, F = funnel()
+    assert "support" not in printcheck.analyse(V, F, {"supports": True})
+    paint = np.zeros(len(F), dtype=np.int8)
+    paint[[4, 5]] = 1                                                # la parete verso -y
+    res = printcheck.analyse(V, F, {"supports": True, "support_type": "snug"}, support_paint=paint)
+    c = res["support"]["columns"]
+    assert len(c) > 100 and c[:, 1].max() < 0.0 and np.allclose(c[:, 3], 0.0)   # solo sotto quella parete
+    assert res["paint_forced_mm2"] > 0 and "forzati" in printcheck.report(res)
+    assert res["support_cm3"] > 0 and res["ok"]
+
+
+def test_painting_blocks_supports_and_the_report_says_so():
+    V, F = table()
+    free = printcheck.analyse(V, F, {"supports": True, "support_type": "snug"})
+    under = np.where(over(V, F))[0]                                  # i due triangoli sotto il piano
+    paint = np.zeros(len(F), dtype=np.int8)
+    paint[under[0]] = -1
+    res = printcheck.analyse(V, F, {"supports": True, "support_type": "snug"}, support_paint=paint)
+    n0, n1 = len(free["support"]["columns"]), len(res["support"]["columns"])
+    assert n1 == pytest.approx(n0 / 2.0, rel=0.1)                    # resta meta del piano
+    assert not res["rows"][2][1] and "VIETATI" in res["rows"][2][2] and not res["ok"]
+    paint[under] = -1
+    assert len(printcheck.analyse(V, F, {"supports": True}, support_paint=paint)["support"]["columns"]) == 0
