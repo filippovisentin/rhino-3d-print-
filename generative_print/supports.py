@@ -437,19 +437,19 @@ def generate(V, F, over_mask, s=None, island_points=None, res=None):
 
 def describe(sup):
     """Una riga per il rapporto."""
-    names = {"grid": "normali a griglia", "snug": "normali aderenti", "tree": "ad albero"}
+    names = {"grid": "normal (grid)", "snug": "normal (snug)", "tree": "tree"}
     n = len(sup["columns"])
     if n == 0:
-        return "Supporti %s: nessuno necessario con queste impostazioni." % names[sup["type"]]
-    txt = "Supporti %s: %.1f cm3 di materiale" % (names[sup["type"]], sup["volume_mm3"] / 1000.0)
+        return "Supports %s: none needed with these settings." % names[sup["type"]]
+    txt = "Supports %s: %.1f cm3 of material" % (names[sup["type"]], sup["volume_mm3"] / 1000.0)
     if sup["type"] == "tree":
         st = sup["stats"]
-        txt += ", %d punte -> %d tronchi sul piano" % (st["tips"], st["on_bed"])
+        txt += ", %d tips -> %d trunks on the bed" % (st["tips"], st["on_bed"])
         if st["on_model"]:
-            txt += ", %d rami poggiano sul pezzo" % st["on_model"]
+            txt += ", %d branches rest on the part" % st["on_model"]
     else:
-        txt += ", area sostenuta %.0f mm2" % (n * sup["res"] ** 2)
+        txt += ", supported area %.0f mm2" % (n * sup["res"] ** 2)
         k = int(sup["on_model"].sum())
         if k:
-            txt += ", %d %% poggia sul pezzo" % round(100.0 * k / n)
-    return txt + " (stima)"
+            txt += ", %d %% rests on the part" % round(100.0 * k / n)
+    return txt + " (estimate)"

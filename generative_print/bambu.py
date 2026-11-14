@@ -426,8 +426,39 @@ def spiral_continuity(g, z_from, z_to, min_jump=0.05):
             "continuous": segs > 0 and travels == 0 and retracts == 0 and drops == 0}
 
 
-def summary_lines(res):
-    """Righe in italiano per scheda e terminale."""
+def _summary_lines_en(res):
+    if not res.get("ok"):
+        return ["Bambu Studio did not slice the part: code %s (%s)." % (res.get("exit_code"), res.get("exit_text"))]
+    L = ["Printer %s, filament %s, Bambu Studio from the command line."
+         % (res["printer"], res.get("filament", "profile PLA")),
+         "Weight %.1f g (profile density %s g/cm3), %.1f m of filament, %d layers, time %s."
+         % (res["weight_g"], res.get("density_g_cm3", "?"), res["filament_m"], res["layers"], res["time_text"])]
+    if res.get("support_m"):
+        L.append("Supports generated: %.1f m." % res["support_m"])
+    if res.get("gap_infill_m"):
+        L.append("Gap infill: %.1f m." % res["gap_infill_m"])
+    ov = res.get("wall_overhang", {})
+    if ov.get("max_deg") is not None:
+        L.append("Outer wall overhang layer by layer (one layer every %d, %d checked): on 99%% of the points of "
+                 "each layer at most %.1f deg, %d layers over the limit; absolute peak %.1f deg at z %.1f mm, "
+                 "%d layers with at least one point over the limit; median %.1f deg."
+                 % (ov["every"], ov["layers_checked"], ov["p99_max_deg"], ov["p99_layers_over_limit"],
+                    ov["max_deg"], ov["z_max"], ov["layers_over_limit"], ov["median_deg"]))
+        if ov.get("discontinuities_z"):
+            L.append("Discontinuities (contours that appear, not slopes) at z: %s mm."
+                     % ", ".join("%g" % z for z in ov["discontinuities_z"][:6]))
+    sp = res.get("spiral")
+    if sp:
+        L.append("Spiral between z %.1f and %.1f mm: %d segments, %d travel moves, %d retractions, %d z drops: %s."
+                 % (sp["z_from"], sp["z_to"], sp["segments"], sp["travel_moves"], sp["retractions"], sp["z_drops"],
+                    "continuous" if sp["continuous"] else "NOT continuous"))
+    return L
+
+
+def summary_lines(res, lang="it"):
+    """Righe per scheda e terminale (italiano) o per il pannello di Rhino (lang="en")."""
+    if lang == "en":
+        return _summary_lines_en(res)
     if not res.get("ok"):
         return ["Bambu Studio non ha affettato il pezzo: codice %s (%s)." % (res.get("exit_code"), res.get("exit_text"))]
     L = ["Stampante %s, filamento %s, Bambu Studio da riga di comando."

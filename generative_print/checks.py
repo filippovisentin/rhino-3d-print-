@@ -440,7 +440,56 @@ def run_checks(V, F, params, raycast=None, samples=3000, skin=None):
     return result
 
 
-def format_report(result):
+EN_LABELS = {"spiral": "One contour per layer (spiral)", "watertight": "Watertight", "floor": "Watertight floor",
+             "closed": "Closed mesh", "overhang": "Max overhang", "islands": "Islands (starts in mid-air)",
+             "bed": "Size", "adhesion": "Bed contact", "stability": "Stability (centre of mass over the contact)",
+             "mass": "Estimated weight", "socket": "Lamp socket hole", "clearance": "Bulb-to-wall distance",
+             "vent": "Top opening", "bulb_fit": "Bulb inside the shade", "diameter": "Max diameter"}
+EN_TEXT = [("quote fuori regola", "heights out of rule"), ("spigoli aperti", "open edges"), ("gradi", "deg"),
+           ("punti", "points"), ("non garantita", "not guaranteed"), ("non richiesta", "not required"),
+           ("richiesta", "required"), ("quote controllate, una ogni mm", "heights checked, one per mm"),
+           ("parete singola: per l'acqua serve un rivestimento interno o un inserto",
+            "single wall: holding water needs an inner coating or an insert"),
+           ("strati pieni", "solid layers"), ("corpo/i", "bodies"), ("facce degeneri", "degenerate faces"),
+           ("mm2 oltre soglia", "mm2 over the limit"), ("facce)", "faces)"), ("pieno al 100%:", "100% solid:"),
+           ("ugello", "nozzle"), ("lo spessore e la larghezza di linea impostata nello slicer",
+                                  "the thickness is the line width set in the slicer"),
+           ("minimo assoluto", "absolute minimum"), ("(deve essere", "(must be"), ("campioni", "samples")]
+
+
+def _en(text):
+    text = str(text)
+    for a, b in EN_TEXT:
+        text = text.replace(a, b)
+    return text
+
+
+def _format_report_en(result):
+    lines = []
+    for c in result["checks"]:
+        lab = c["label"]
+        if c["id"] == "wall":
+            lab = "Spiral wall (one line)" if "spirale" in lab else "Min thickness (1st percentile)"
+        elif c["id"] == "socket":
+            lab = "Lamp socket hole" + lab[len("Foro portalampada"):]
+        elif c["id"] == "watertight":
+            lab = "Watertight" + (" (information only)" if "informativo" in lab else "")
+        else:
+            lab = EN_LABELS.get(c["id"], lab)
+        lines.append("%s %-40s %s %s  (limit %s) %s" % ("OK " if c["pass"] else "NO ", lab, c["value"], _en(c["unit"]),
+                                                        _en(c["limit"]), _en(c["note"])))
+    lines.append("RESULT: %s  |  %d layers" % ("PRINTABLE" if result["pass"] else "NEEDS FIXING", result["layers"]))
+    if "material" in result:
+        m = result["material"]
+        lines.append("Material: %.1f cm3, %.1f g, %.1f m of filament, about %.1f h (rough estimate)"
+                     % (m["volume_cm3"], m["mass_est_g"], m["filament_m"], m["time_h_rough"]))
+    return "\n".join(lines)
+
+
+def format_report(result, lang="it"):
+    """Rapporto a righe: in italiano per schede e diario, in inglese (lang="en") per i pannelli di Rhino."""
+    if lang == "en":
+        return _format_report_en(result)
     lines = []
     for c in result["checks"]:
         mark = "OK " if c["pass"] else "NO "

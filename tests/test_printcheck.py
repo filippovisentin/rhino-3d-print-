@@ -35,7 +35,7 @@ def test_bed_fit_overhang_and_supports():
     V, F = box(200, 100, 30)
     small = printcheck.analyse(V, F, {"bed": [180, 180, 180]})
     assert not small["fits"] and small["fit_scale"] == pytest.approx(0.9)      # 200 mm su un piano da 180
-    assert "ridotto al 90%" in printcheck.report(small)
+    assert "scaling to 90%" in printcheck.report(small)
     assert bambu.filament_profile("Bambu Lab X1 Carbon 0.4 nozzle", "PLA") == "Bambu PLA Basic @BBL X1C"
     assert printcheck.analyse(V, F, {"bed": [256, 256, 256]})["fits"]
     # tavolo: piano 60 x 60 x 5 su una gamba 10 x 10 x 30 -> il sotto del piano e uno sbalzo a 90 gradi
@@ -46,7 +46,7 @@ def test_bed_fit_overhang_and_supports():
     res = printcheck.analyse(V2, F2)
     assert res["needs_support"] and not res["ok"] and res["overhang_max_deg"] == pytest.approx(90.0)
     assert printcheck.analyse(V2, F2, {"supports": True})["rows"][2][1]       # con i supporti passa
-    assert "supporti" in printcheck.report(res)
+    assert "supports" in printcheck.report(res)
 
 
 def test_hatch_square_with_hole():

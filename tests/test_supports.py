@@ -104,7 +104,7 @@ def test_analyse_uses_the_chosen_support_type():
     for kind in supports.TYPES:
         res = printcheck.analyse(V, F, {"supports": True, "support_type": kind})
         assert res["support"]["type"] == kind and res["support_cm3"] > 0
-        assert "Supporti" in printcheck.report(res)
+        assert "Supports" in printcheck.report(res)
     assert "support" not in printcheck.analyse(*box(20, 20, 20), over={"supports": True})
 
 
@@ -126,7 +126,7 @@ def test_painting_forces_supports_where_none_are_needed():
     res = printcheck.analyse(V, F, {"supports": True, "support_type": "snug"}, support_paint=paint)
     c = res["support"]["columns"]
     assert len(c) > 100 and c[:, 1].max() < 0.0 and np.allclose(c[:, 3], 0.0)   # solo sotto quella parete
-    assert res["paint_forced_mm2"] > 0 and "forzati" in printcheck.report(res)
+    assert res["paint_forced_mm2"] > 0 and "forced" in printcheck.report(res)
     assert res["support_cm3"] > 0 and res["ok"]
 
 
@@ -139,6 +139,6 @@ def test_painting_blocks_supports_and_the_report_says_so():
     res = printcheck.analyse(V, F, {"supports": True, "support_type": "snug"}, support_paint=paint)
     n0, n1 = len(free["support"]["columns"]), len(res["support"]["columns"])
     assert n1 == pytest.approx(n0 / 2.0, rel=0.1)                    # resta meta del piano
-    assert not res["rows"][2][1] and "VIETATI" in res["rows"][2][2] and not res["ok"]
+    assert not res["rows"][2][1] and "BLOCKED" in res["rows"][2][2] and not res["ok"]
     paint[under] = -1
     assert len(printcheck.analyse(V, F, {"supports": True}, support_paint=paint)["support"]["columns"]) == 0

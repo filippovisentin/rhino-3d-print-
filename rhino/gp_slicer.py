@@ -45,10 +45,10 @@ WALL_COLORS = [(235, 95, 25), (245, 170, 40), (250, 205, 90)]      # esterna, in
 INFILL_COLOR = (60, 140, 215)
 SUPPORT_COLOR = (40, 160, 90)
 SUPPORT_FACE_COLOR = (20, 110, 60)
-PAINT_MODES = [(None, "Spenta"), (1, "Forza i supporti"), (-1, "Vieta i supporti"), (0, "Cancella")]
+PAINT_MODES = [(None, "Off"), (1, "Force supports"), (-1, "Block supports"), (0, "Erase")]
 PAINT_COLORS = {1: (55, 110, 230), -1: (95, 70, 110)}
-SUPPORT_TYPES = [(None, "Nessuno"), ("grid", "Normali a griglia"), ("snug", "Normali aderenti"),
-                 ("tree", "Ad albero")]
+SUPPORT_TYPES = [(None, "None"), ("grid", "Normal (grid)"), ("snug", "Normal (snug)"),
+                 ("tree", "Tree")]
 
 
 def int_array(values):
@@ -131,7 +131,7 @@ class Job(object):
         self.doc = doc
         self.obj_ids = [o.Id for o in objs]
         names = [o.Attributes.Name or o.ObjectType.ToString() for o in objs]
-        self.name = names[0] if len(names) == 1 else "%d oggetti" % len(names)
+        self.name = names[0] if len(names) == 1 else "%d objects" % len(names)
         joined = rg.Mesh()
         for o in objs:
             m = mesh_from_geometry(o.Geometry)
@@ -139,7 +139,7 @@ class Job(object):
                 joined.Append(m)
         self.V0, self.F = gp_rhino.from_rhino_mesh(joined)        # come disegnato
         if len(self.F) == 0:
-            raise ValueError("Nessuna geometria stampabile negli oggetti scelti")
+            raise ValueError("No printable geometry in the chosen objects")
         self.paint = np.zeros(len(self.F), dtype=np.int8)     # supporti dipinti: +1 forza, -1 vieta
         self.orient(np.eye(3))
 
@@ -340,7 +340,7 @@ class Slicer(object):
         self.error = traceback.format_exc()
         self.conduit.Enabled = False
         self.mouse.Enabled = False
-        Rhino.RhinoApp.WriteLine("Generative Print: errore nello slicer\n" + self.error)
+        Rhino.RhinoApp.WriteLine("Generative Print: slicer error\n" + self.error)
 
     # ----------------------------------------------------------- oggetti
     def find_targets(self, doc):
@@ -442,10 +442,10 @@ class Slicer(object):
             fill_len = float(np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1).sum()) if len(seg) else 0.0
         wall_len = sum(pl.Length for _, pl in walls)
         self._support_draw()
-        self.layer_text = ("Strato %d / %d   z = %.2f mm   contorni %d   pareti %.0f mm   %s %.0f mm%s"
+        self.layer_text = ("Layer %d / %d   z = %.2f mm   contours %d   walls %.0f mm   %s %.0f mm%s"
                            % (index + 1, n, zw, len(closed), wall_len,
-                              "strato pieno" if solid else "riempimento", fill_len,
-                              "   APERTI: %d" % len(j.open_loops) if j.open_loops else ""))
+                              "solid layer" if solid else "infill", fill_len,
+                              "   OPEN: %d" % len(j.open_loops) if j.open_loops else ""))
         self.refresh()
         j.doc.Views.Redraw()
         return {"index": index, "layers": n, "z": zw, "loops": len(closed), "walls": len(walls),
@@ -590,7 +590,7 @@ class Slicer(object):
     # ----------------------------------------------------------- orientamento
     def _reoriented(self, R, note):
         self.job.orient(R)
-        self.extra = [l for l in self.extra if not l.startswith("Orientamento")] + [note]
+        self.extra = [l for l in self.extra if not l.startswith("Orientation")] + [note]
         self.layer_index = 0
         return self.analyse()
 
@@ -603,7 +603,7 @@ class Slicer(object):
         Ra = {"x": [[1, 0, 0], [0, c, -s], [0, s, c]], "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]],
               "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[axis]
         return self._reoriented(np.array(Ra, dtype=float) @ self.job.R,
-                                "Orientamento: ruotato di %g gradi attorno a %s (il modello non e cambiato)."
+                                "Orientation: rotated %g degrees about %s (the model is unchanged)."
                                 % (degrees, axis.upper()))
 
     def best_orientation(self):
@@ -615,14 +615,14 @@ class Slicer(object):
         ranked = printcheck.orientations(j.V0, j.F, self.settings)
         self.ranked = ranked
         b = ranked[0]
-        self._reoriented(b["R"], "Orientamento migliore tra %d provati: sbalzo %.0f mm2 (prima %.0f), appoggio "
-                         "%.0f mm2, altezza %.1f mm. Il modello non e cambiato: 'Applica al modello' per ruotarlo."
+        self._reoriented(b["R"], "Orientation: best of %d tried: overhang %.0f mm2 (before %.0f), bed contact "
+                         "%.0f mm2, height %.1f mm. The model is unchanged: 'Apply to model' to rotate it."
                          % (len(ranked), b["overhang_area_mm2"], before, b["contact_mm2"], b["height"]))
         return b
 
     def reset_orientation(self):
         if self.job is not None:
-            self._reoriented(np.eye(3), "Orientamento: come disegnato.")
+            self._reoriented(np.eye(3), "Orientation: as drawn.")
 
     def apply_orientation(self):
         """Ruota davvero gli oggetti di Rhino come nell'anteprima (un solo passo di Annulla)."""
@@ -638,7 +638,7 @@ class Slicer(object):
                 xf[r, k] = float(j.R[r, k])
             xf[r, 3] = float(shift[r])
         doc, ids = j.doc, list(j.obj_ids)
-        sn = doc.BeginUndoRecord("Generative Print: orientamento di stampa")
+        sn = doc.BeginUndoRecord("Generative Print: print orientation")
         for oid in ids:
             doc.Objects.Transform(oid, xf, True)
         doc.EndUndoRecord(sn)
@@ -646,7 +646,7 @@ class Slicer(object):
         st.HiddenObjects = True
         objs = [o for o in doc.Objects.GetObjectList(st) if o.Id in ids]
         self.open(doc, objs)
-        self.extra = ["Orientamento applicato al modello (Annulla in Rhino per tornare indietro)."]
+        self.extra = ["Orientation applied to the model (Undo in Rhino to go back)."]
         self.refresh()
         return True
 
@@ -655,10 +655,10 @@ class Slicer(object):
         th = checks.thickness(j.V, j.F, gp_rhino.raycast_rhino(j.mesh), samples=1500)
         lw = float(self.settings["line_width"])
         ok = th["p1"] >= 2 * lw - 1e-6
-        self.extra = [l for l in self.extra if not l.startswith("Spessore")]
-        self.extra.append("Spessore: minimo %.2f mm, 1 percentile %.2f, mediana %.2f (%d campioni) -> %s"
+        self.extra = [l for l in self.extra if not l.startswith("Thickness")]
+        self.extra.append("Thickness: min %.2f mm, 1st percentile %.2f, median %.2f (%d samples) -> %s"
                           % (th["min"], th["p1"], th["median"], th["samples"],
-                             "ok" if ok else "sotto due linee da %g mm: pareti fragili" % lw))
+                             "ok" if ok else "below two %g mm lines: fragile walls" % lw))
         self.refresh()
         return th
 
@@ -669,7 +669,7 @@ class Slicer(object):
             return False
         exe = os.path.join(REPO, ".venv", "Scripts", "python.exe")
         if not bambu.available() or not os.path.exists(exe):
-            self.extra.append("Bambu: serve Bambu Studio installato e l'ambiente .venv del progetto.")
+            self.extra.append("Bambu: needs Bambu Studio installed and the project's .venv environment.")
             self.refresh()
             return False
         out = os.path.join(tempfile.gettempdir(), "generative_print_slicer")
@@ -695,8 +695,8 @@ class Slicer(object):
                                      text=True, creationflags=0x08000000)
         self.t0 = time.time()
         if j.paint.any():
-            self.extra.append("Nota: la pittura dei supporti vale per la nostra anteprima; a Bambu non viene "
-                              "passata (lui li mette in automatico).")
+            self.extra.append("Note: support painting only applies to our preview; it is not passed to Bambu "
+                              "(which places supports automatically).")
         if self.timer is not None:
             self.timer.Start()
         self.bambu_poll()
@@ -708,7 +708,7 @@ class Slicer(object):
             return True
         self.extra = [l for l in self.extra if not l.startswith("Bambu")]
         if self.proc.poll() is None:
-            self.extra.append("Bambu Studio sta affettando... %d s" % (time.time() - self.t0))
+            self.extra.append("Bambu Studio is slicing... %d s" % (time.time() - self.t0))
             self.refresh()
             return False
         text = (self.proc.stdout.read() or "").strip()
@@ -719,16 +719,16 @@ class Slicer(object):
         if os.path.exists(self.bambu_json):
             with open(self.bambu_json, encoding="utf-8") as fh:
                 self.bambu_result = json.load(fh)
-            lines = bambu.summary_lines(self.bambu_result)
+            lines = bambu.summary_lines(self.bambu_result, "en")
             r, b = self.result, self.bambu_result
             if b.get("ok") and r and "mass_g" in r:
-                lines.append("Confronto: la nostra stima era %.1f g e %.1f h (densita %g)."
+                lines.append("Comparison: our estimate was %.1f g and %.1f h (density %g)."
                              % (r["mass_g"], r["time_h"], self.settings["density_g_cm3"]))
                 if self.material_name not in b.get("filament", ""):
-                    lines.append("Nota: per %s non c'e un profilo Bambu su questa stampante, ha usato %s."
+                    lines.append("Note: there is no Bambu profile for %s on this printer, it used %s."
                                  % (self.material_name, b.get("filament")))
         else:
-            lines = ["non ha prodotto un risultato:"] + text.splitlines()[-4:]
+            lines = ["produced no result:"] + text.splitlines()[-4:]
         self.extra += ["Bambu (%d s): %s" % (time.time() - self.t0, lines[0])] + ["Bambu: " + l for l in lines[1:]]
         self.refresh()
         return True
@@ -751,10 +751,10 @@ class Slicer(object):
             m = j.mesh.QuadRemesh(qp)
         except Exception:
             m = None
-        note = "maglia regolare, lato circa %.1f mm" % edge
+        note = "regular mesh, edge about %.1f mm" % edge
         if m is None or m.Faces.Count < 50:
             m = j.mesh.DuplicateMesh()
-            note = "QuadRemesh non riuscito: uso la mesh cosi com'e"
+            note = "QuadRemesh failed: using the mesh as it is"
         m.Faces.ConvertQuadsToTriangles()
         m.Vertices.CombineIdentical(True, True)
         m.Compact()
@@ -771,8 +771,8 @@ class Slicer(object):
     # ----------------------------------------------------------- interfaccia Eto
     def report_text(self):
         if self.job is None:
-            return ("Nessun oggetto.\n\nSeleziona in Rhino cio che vuoi stampare (mesh, polisuperficie,\n"
-                    "estrusione o SubD) e premi 'Usa selezione'.")
+            return ("No object.\n\nSelect in Rhino what you want to print (mesh, polysurface,\n"
+                    "extrusion or SubD) and press 'Use selection'.")
         L = [printcheck.report(self.result)]
         if self.extra:
             L += [""] + self.extra
@@ -784,7 +784,7 @@ class Slicer(object):
         if self.form is None:
             return
         j = self.job
-        self.w_obj.Text = ("Oggetto: %s   (%d triangoli)" % (j.name, len(j.F))) if j else "Oggetto: nessuno"
+        self.w_obj.Text = ("Object: %s   (%d triangles)" % (j.name, len(j.F))) if j else "Object: none"
         self.w_report.Text = self.report_text()
         if j is not None:
             n = j.layer_count(float(self.settings["layer"]))
@@ -880,22 +880,22 @@ class Slicer(object):
         self.w_limit = stepper(30, 70, s["overhang_limit_deg"], 1, 0)
         kinds = [text for _, text in SUPPORT_TYPES]
         self.w_sup = dropdown(kinds, dict(SUPPORT_TYPES)[s["support_type"]] if s["supports"] else kinds[0])
-        self.w_bed = check("Supporti solo dal piano", bool(s["support_bed_only"]), self.on_settings)
+        self.w_bed = check("Supports from bed only", bool(s["support_bed_only"]), self.on_settings)
         modes = [text for _, text in PAINT_MODES]
         self.w_paint = ef.DropDown()
         for text in modes:
             self.w_paint.Items.Add(text)
         self.w_paint.SelectedIndex = [m for m, _ in PAINT_MODES].index(self.paint_mode)
         self.w_paint.SelectedIndexChanged += lambda s_, e: self.guard(self.on_paint)
-        self.w_paint.ToolTip = ("Trascina col tasto sinistro sul pezzo: blu = supporto forzato, viola = vietato. "
-                                "Ctrl cancella. I supporti si ricalcolano quando rilasci.")
+        self.w_paint.ToolTip = ("Drag with the left button on the part: blue = forced support, purple = blocked. "
+                                "Ctrl erases. Supports are recalculated on release.")
         self.w_paint_r = ef.Slider()
         self.w_paint_r.MinValue, self.w_paint_r.MaxValue, self.w_paint_r.Value = 1, 30, int(self.paint_radius)
         self.w_paint_r.ValueChanged += lambda s_, e: self.guard(self.on_paint)
-        self.w_paint_l = label("Raggio %d mm" % self.paint_radius)
-        self.w_heat = check("Mappa degli sbalzi", self.heat, self.on_view)
-        self.w_heat.ToolTip = "Arancio = vicino alla soglia, rosso = oltre"
-        self.w_layers = check("Strati", self.layer_on, self.on_view)
+        self.w_paint_l = label("Radius %d mm" % self.paint_radius)
+        self.w_heat = check("Overhang map", self.heat, self.on_view)
+        self.w_heat.ToolTip = "Orange = near the limit, red = over"
+        self.w_layers = check("Layers", self.layer_on, self.on_view)
         self.w_layer = ef.Slider()
         self.w_layer.MinValue, self.w_layer.MaxValue, self.w_layer.Value = 0, 100, 0
         self.w_layer.ValueChanged += lambda s_, e: self.guard(self.on_view)
@@ -911,37 +911,37 @@ class Slicer(object):
         lay.Padding = ed.Padding(8)
         lay.Spacing = ed.Size(6, 7)
         lay.AddRow(self.w_obj)
-        lay.AddRow(button("Usa selezione", self.on_pick, "Analizza gli oggetti selezionati in Rhino"))
-        lay.AddRow(title("Stampa"))
-        lay.AddRow(table([(label("Stampante"), self.w_printer), (label("Materiale"), self.w_material),
-                          (label("Strato (mm)"), self.w_h), (label("Linea (mm)"), self.w_lw),
-                          (label("Pareti"), self.w_walls), (label("Riempimento (%)"), self.w_infill),
-                          (label("Strati pieni sopra"), self.w_top), (label("Strati pieni sotto"), self.w_bottom),
-                          (label("Limite sbalzo (gradi)"), self.w_limit)]))
-        lay.AddRow(title("Supporti"))
-        lay.AddRow(table([(label("Tipo"), self.w_sup)]))
+        lay.AddRow(button("Use selection", self.on_pick, "Analyse the objects selected in Rhino"))
+        lay.AddRow(title("Print"))
+        lay.AddRow(table([(label("Printer"), self.w_printer), (label("Material"), self.w_material),
+                          (label("Layer (mm)"), self.w_h), (label("Line (mm)"), self.w_lw),
+                          (label("Walls"), self.w_walls), (label("Infill (%)"), self.w_infill),
+                          (label("Top solid layers"), self.w_top), (label("Bottom solid layers"), self.w_bottom),
+                          (label("Overhang limit (deg)"), self.w_limit)]))
+        lay.AddRow(title("Supports"))
+        lay.AddRow(table([(label("Type"), self.w_sup)]))
         lay.AddRow(self.w_bed)
-        lay.AddRow(table([(label("Pittura"), self.w_paint), (self.w_paint_l, self.w_paint_r)]))
-        lay.AddRow(button("Cancella la pittura", self.clear_paint, "Torna ai supporti automatici"))
-        lay.AddRow(title("Vista"))
+        lay.AddRow(table([(label("Paint"), self.w_paint), (self.w_paint_l, self.w_paint_r)]))
+        lay.AddRow(button("Clear paint", self.clear_paint, "Back to automatic supports"))
+        lay.AddRow(title("View"))
         lay.AddRow(self.w_heat)
         lay.AddRow(table([(self.w_layers, self.w_layer)]))
         lay.AddRow(self.w_layer_info)
-        lay.AddRow(title("Orientamento"))
-        lay.AddRow(table([(button("Ruota X 90", lambda: self.rotate_by("x")),
-                           button("Ruota Y 90", lambda: self.rotate_by("y"))),
-                          (button("Migliore", self.best_orientation, "Prova gli orientamenti e sceglie meno sbalzi"),
-                           button("Come disegnato", self.reset_orientation)),
-                          (button("Applica al modello", self.apply_orientation,
-                                  "Ruota davvero gli oggetti di Rhino (un passo di Annulla)"), None)]))
-        lay.AddRow(title("Azioni"))
-        lay.AddRow(table([(button("Verifica spessori", self.thickness),
-                           button("Affetta con Bambu", self.bambu_start,
-                                  "Slicer vero con le stesse impostazioni: peso e tempo precisi")),
-                          (button("Esporta STL", self.on_export),
-                           button("Modifica plastica", self.on_sculpt, "Pennelli di scultura su una copia"))]))
+        lay.AddRow(title("Orientation"))
+        lay.AddRow(table([(button("Rotate X 90", lambda: self.rotate_by("x")),
+                           button("Rotate Y 90", lambda: self.rotate_by("y"))),
+                          (button("Best", self.best_orientation, "Tries orientations and picks the one with the least overhang"),
+                           button("As drawn", self.reset_orientation)),
+                          (button("Apply to model", self.apply_orientation,
+                                  "Actually rotates the Rhino objects (one Undo step)"), None)]))
+        lay.AddRow(title("Actions"))
+        lay.AddRow(table([(button("Check thickness", self.thickness),
+                           button("Slice with Bambu", self.bambu_start,
+                                  "Real slicer with the same settings: accurate weight and time")),
+                          (button("Export STL", self.on_export),
+                           button("Sculpt", self.on_sculpt, "Sculpting brushes on a copy"))]))
         lay.AddRow(self.w_report)
-        note = label("Pareti, riempimento e supporti sono un'anteprima; peso e tempo precisi: Affetta con Bambu.")
+        note = label("Walls, infill and supports are a preview; for accurate weight and time: Slice with Bambu.")
         note.Wrap = ef.WrapMode.Word
         lay.AddRow(note)
         lay.AddRow(None)
@@ -966,7 +966,7 @@ class Slicer(object):
                 self.form, self.docked = scroll, True
             except Exception:
                 self.error = traceback.format_exc()
-                Rhino.RhinoApp.WriteLine("Generative Print: pannello agganciato non riuscito, apro una finestra\n"
+                Rhino.RhinoApp.WriteLine("Generative Print: docked panel failed, opening a window\n"
                                          + self.error)
         if not self.docked:
             form = ef.Form()
@@ -1001,7 +1001,7 @@ class Slicer(object):
     def on_paint(self):
         self.paint_mode = PAINT_MODES[max(0, self.w_paint.SelectedIndex)][0]
         self.paint_radius = float(self.w_paint_r.Value)
-        self.w_paint_l.Text = "Raggio %d mm" % self.paint_radius
+        self.w_paint_l.Text = "Radius %d mm" % self.paint_radius
         self.paint_cursor = None
         self.mouse.Enabled = self.paint_mode is not None and self.job is not None
         if self.paint_mode in (1, -1) and not self.settings["supports"] and self.w_sup.SelectedIndex == 0:
@@ -1034,12 +1034,12 @@ class Slicer(object):
         if self.job is None:
             return
         dlg = ef.SaveFileDialog()
-        dlg.Title = "Esporta STL (appoggiato al piano)"
+        dlg.Title = "Export STL (resting on the bed)"
         dlg.Filters.Add(ef.FileFilter("STL", ".stl"))
         if dlg.ShowDialog(Rhino.UI.RhinoEtoApp.MainWindow) == ef.DialogResult.Ok:
             path = dlg.FileName if dlg.FileName.lower().endswith(".stl") else dlg.FileName + ".stl"
             mesh_io.write_stl(path, self.job.Vw, self.job.F)
-            self.extra.append("Esportato " + path)
+            self.extra.append("Exported " + path)
             self.refresh()
 
     def on_sculpt(self):
@@ -1048,7 +1048,7 @@ class Slicer(object):
             return
         doc = self.job.doc
         sid, note = self.sculpt_target()
-        self.extra = ["Modifica plastica aperta su una copia (%s). L'originale e nascosto: _Show per riaverlo." % note]
+        self.extra = ["Sculpt opened on a copy (%s). The original is hidden: _Show to bring it back." % note]
         self.refresh()
         ed = gp_editor.get_editor()
         ed.open(doc, doc.Objects.FindId(sid))

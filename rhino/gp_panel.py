@@ -13,7 +13,7 @@ import scriptcontext as sc
 
 STICKY = "generative_print_panels"
 PANELS = {"slicer": ("6f0b6c1e-3c52-4a56-9d0e-5d1f0a7c2b11", "GP Slicer"),
-          "editor": ("6f0b6c1e-3c52-4a56-9d0e-5d1f0a7c2b12", "GP Scultura")}
+          "editor": ("6f0b6c1e-3c52-4a56-9d0e-5d1f0a7c2b12", "GP Sculpt")}
 
 
 def _state():
@@ -47,7 +47,7 @@ def _plugin():
             p = Rhino.PlugIns.PlugIn.Find(pid)
             if p is not None:
                 return p
-    raise RuntimeError("Nessun plug-in a cui intestare il pannello")
+    raise RuntimeError("No plug-in to own the panel")
 
 
 def _on_closed(sender, e):
@@ -88,7 +88,7 @@ def dock(key, content, on_closed=None, doc=None):
     doc = doc or Rhino.RhinoDoc.ActiveDoc
     panel = Rhino.UI.Panels.GetPanel(gid, doc)
     if panel is None:
-        raise RuntimeError("Rhino non ha creato il pannello " + title)
+        raise RuntimeError("Rhino did not create the panel " + title)
     panel.Content = content
     st["closed"][key] = on_closed
     return panel

@@ -125,14 +125,14 @@ def analyse(V, F, over=None, raycast=None, support_paint=None):
     blocked = float(areas[paint < 0].sum()) if paint is not None else 0.0
     bare = float(areas[over_mask & (paint < 0)].sum()) if paint is not None else 0.0   # sbalzo lasciato senza
 
-    rows = [("Mesh chiusa", closed, "%d spigoli aperti, %d corpi" % (topo["naked_edges"], topo["bodies"])),
-            ("Ingombro", bool(fits), "%.1f x %.1f x %.1f mm (stampante %g x %g x %g)" % (tuple(size) + tuple(bed))),
-            ("Sbalzi", (not over_area > 1.0) or (sup_on and bare <= 1.0),
-             "max %.1f gradi (limite %g), %.0f mm2 oltre%s%s"
-             % (max_deg, lim, over_area, "  -> con supporti" if over_area > 1.0 and sup_on else "",
-                (", %.0f mm2 VIETATI senza supporto" % bare) if sup_on and bare > 1.0 else "")),
-            ("Isole", islands == 0 or sup_on, "%d partenze nel vuoto" % islands),
-            ("Appoggio", contact >= 100.0, "%.0f mm2 sul piano" % contact)]
+    rows = [("Closed mesh", closed, "%d open edges, %d bodies" % (topo["naked_edges"], topo["bodies"])),
+            ("Size", bool(fits), "%.1f x %.1f x %.1f mm (printer %g x %g x %g)" % (tuple(size) + tuple(bed))),
+            ("Overhangs", (not over_area > 1.0) or (sup_on and bare <= 1.0),
+             "max %.1f deg (limit %g), %.0f mm2 over%s%s"
+             % (max_deg, lim, over_area, "  -> with supports" if over_area > 1.0 and sup_on else "",
+                (", %.0f mm2 BLOCKED without support" % bare) if sup_on and bare > 1.0 else "")),
+            ("Islands", islands == 0 or sup_on, "%d starts in mid-air" % islands),
+            ("Bed contact", contact >= 100.0, "%.0f mm2 on the bed" % contact)]
     out = {"settings": s, "lift_mm": lift, "fit_scale": float(fit_scale), "size": [float(x) for x in size], "closed": closed, "fits": bool(fits),
            "overhang_max_deg": max_deg, "overhang_area_mm2": over_area, "islands": islands,
            "contact_mm2": contact, "needs_support": bool(needs_support),
@@ -141,7 +141,7 @@ def analyse(V, F, over=None, raycast=None, support_paint=None):
            "layers": int(math.ceil(float(size[2]) / float(s["layer"])))}
     if closed:
         st = checks.stability(V, F)
-        rows.append(("Stabilita", st["margin_mm"] > 0, "baricentro a %.1f mm dal bordo dell'appoggio" % st["margin_mm"]))
+        rows.append(("Stability", st["margin_mm"] > 0, "centre of mass %.1f mm from the contact edge" % st["margin_mm"]))
         vol, ext = material(V, F, s)
         sup = 0.0
         if sup_on and (needs_support or forced > 0):
@@ -168,28 +168,28 @@ def report(res):
     L = ["%s %-12s %s" % ("OK" if ok else "NO", lab, txt) for lab, ok, txt in res["rows"]]
     L.append("")
     if res["lift_mm"] > 0.01:
-        L.append("Il pezzo e sollevato di %.2f mm: qui e considerato appoggiato al piano." % res["lift_mm"])
+        L.append("The part is lifted by %.2f mm: here it is treated as resting on the bed." % res["lift_mm"])
     if "mass_g" in res:
         s = res["settings"]
-        L.append("Strati %d da %g mm | pareti %d da %g mm | riempimento %d%%"
+        L.append("%d layers of %g mm | %d walls of %g mm | infill %d%%"
                  % (res["layers"], s["layer"], s["walls"], s["line_width"], round(100 * s["infill"])))
-        L.append("Volume del solido %.1f cm3 | materiale estruso %.1f cm3" % (res["volume_cm3"], res["extruded_cm3"]))
-        L.append("Peso %.1f g | filo %.1f m | tempo circa %.1f h (stime geometriche)"
+        L.append("Solid volume %.1f cm3 | extruded material %.1f cm3" % (res["volume_cm3"], res["extruded_cm3"]))
+        L.append("Weight %.1f g | filament %.1f m | time about %.1f h (geometric estimates)"
                  % (res["mass_g"], res["filament_m"], res["time_h"]))
         if res.get("support") is not None:
             L.append(supports.describe(res["support"]))
         if res.get("paint_forced_mm2", 0) > 0 or res.get("paint_blocked_mm2", 0) > 0:
-            L.append("Pittura dei supporti: %.0f mm2 forzati, %.0f mm2 vietati%s"
+            L.append("Support paint: %.0f mm2 forced, %.0f mm2 blocked%s"
                      % (res["paint_forced_mm2"], res["paint_blocked_mm2"],
-                        "" if s["supports"] else " (accendi i supporti per usarla)"))
+                        "" if s["supports"] else " (turn supports on to use it)"))
     else:
-        L.append("Mesh aperta: volume, peso e tempo non calcolabili. Chiudi il solido.")
+        L.append("Open mesh: volume, weight and time cannot be computed. Close the solid.")
     if not res["fits"]:
-        L.append("NON ENTRA nella stampante: andrebbe ridotto al %d%% (oppure prova un altro orientamento)."
+        L.append("DOES NOT FIT the printer: it would need scaling to %d%% (or try another orientation)."
                  % int(math.floor(100 * res["fit_scale"])))
     if res["needs_support"] and not res["settings"]["supports"]:
-        L.append("ATTENZIONE: servono supporti (zone rosse) oppure va cambiato l'orientamento.")
-    L.append("ESITO: %s" % ("STAMPABILE" if res["ok"] else "DA CORREGGERE"))
+        L.append("WARNING: supports are needed (red areas) or the orientation must change.")
+    L.append("RESULT: %s" % ("PRINTABLE" if res["ok"] else "NEEDS FIXING"))
     return "\n".join(L)
 
 

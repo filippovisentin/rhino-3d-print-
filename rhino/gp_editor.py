@@ -40,20 +40,20 @@ import gp_rhino  # noqa: E402
 from generative_print import checks, generators, mesh_io, sculpt, slicer  # noqa: E402
 
 STICKY = "generative_print_editor"
-BRUSH_LABELS = [("draw", "Tira / Spingi"), ("clay", "Argilla"), ("inflate", "Gonfia"), ("layer", "Strato"),
-                ("crease", "Piega"), ("smooth", "Liscia"), ("flatten", "Appiattisci"), ("scrape", "Raschia"),
-                ("pinch", "Pizzica"), ("grab", "Afferra"), ("mask", "Maschera")]
-BRUSH_HELP = {"draw": "Alza la superficie lungo la normale (Ctrl: scava).",
-              "clay": "Aggiunge materiale a strisce piatte, riempiendo le conche (Ctrl: toglie).",
-              "inflate": "Gonfia: ogni punto si sposta lungo la propria normale.",
-              "layer": "Rilievo ad altezza costante: ripassando non cresce oltre.",
-              "crease": "Solco netto che stringe la superficie (Ctrl: cresta).",
-              "smooth": "Liscia le irregolarita.",
-              "flatten": "Porta la zona su un piano.",
-              "scrape": "Abbassa solo le creste (Ctrl: riempie solo le valli).",
-              "pinch": "Stringe i punti verso il centro del pennello.",
-              "grab": "Afferra e trascina la zona.",
-              "mask": "Dipinge una protezione: la zona scura non si muove (Ctrl: cancella)."}
+BRUSH_LABELS = [("draw", "Draw"), ("clay", "Clay"), ("inflate", "Inflate"), ("layer", "Layer"),
+                ("crease", "Crease"), ("smooth", "Smooth"), ("flatten", "Flatten"), ("scrape", "Scrape"),
+                ("pinch", "Pinch"), ("grab", "Grab"), ("mask", "Mask")]
+BRUSH_HELP = {"draw": "Raises the surface along the normal (Ctrl: digs).",
+              "clay": "Adds material in flat strips, filling hollows (Ctrl: removes).",
+              "inflate": "Inflate: each point moves along its own normal.",
+              "layer": "Constant-height relief: going over it again does not grow further.",
+              "crease": "Sharp groove that pinches the surface (Ctrl: ridge).",
+              "smooth": "Smooths out irregularities.",
+              "flatten": "Brings the area onto a plane.",
+              "scrape": "Lowers only the ridges (Ctrl: fills only the valleys).",
+              "pinch": "Pulls points towards the brush centre.",
+              "grab": "Grabs and drags the area.",
+              "mask": "Paints a protection: the dark area does not move (Ctrl: erases)."}
 FRACTION_BRUSHES = ("smooth", "flatten", "pinch", "scrape")
 CLAY = (214, 208, 198)
 UNDO_STEPS = 60
@@ -209,8 +209,8 @@ class Session(object):
         if len(res["moved"]):
             sculpt.constrain(self.V, self.base_ring)
             self.push(res["moved"])
-        self.respect_note = ("limite rispettato (%d punti corretti)" % len(res["moved"]) if res["ok"]
-                             else "limite NON raggiunto nella zona: %.0f gradi" % res["max_deg"])
+        self.respect_note = ("limit respected (%d points corrected)" % len(res["moved"]) if res["ok"]
+                             else "limit NOT reached in the area: %.0f deg" % res["max_deg"])
         return res
 
     # ---------------------------------------------------------------- selezione col mouse
@@ -396,10 +396,10 @@ class Session(object):
             rc = gp_rhino.raycast_rhino(gp_rhino.to_rhino_mesh(Vs, Fs))
             skin = self.V.reshape(self.grid[0], self.grid[1], 3) if self.grid else None
             self.result = checks.run_checks(Vs, Fs, self.params, raycast=rc, samples=samples, skin=skin)
-            self.report = checks.format_report(self.result)
+            self.report = checks.format_report(self.result, "en")
         except Exception as exc:
             self.result = None
-            self.report = "Impossibile costruire il solido: %s" % exc
+            self.report = "Cannot build the solid: %s" % exc
         return self.report
 
     def set_layer(self, index):
@@ -410,7 +410,7 @@ class Session(object):
         try:
             Vs, Fs = self.build_solid()
         except Exception as exc:
-            return "Solido non valido: %s" % exc
+            return "Invalid solid: %s" % exc
         h = float(self.params["print"]["layer"])
         z = (index + 0.5) * h
         seg = slicer.slice_segments(Vs, Fs, z)
@@ -419,7 +419,7 @@ class Session(object):
         self.layer_mesh = gp_rhino.to_rhino_mesh(Vs, slicer.faces_below(Vs, Fs, z))
         self.layer_z = z
         per = float(np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1).sum()) if len(seg) else 0.0
-        return "Strato %d  z = %.2f mm  perimetro %.0f mm" % (index + 1, z, per)
+        return "Layer %d  z = %.2f mm  perimeter %.0f mm" % (index + 1, z, per)
 
     def layer_count(self):
         return int(np.ceil(self.V[:, 2].max() / float(self.params["print"]["layer"])))
@@ -586,7 +586,7 @@ class Editor(object):
         self.error = traceback.format_exc()
         self.mouse.Enabled = False
         self.conduit.Enabled = False
-        Rhino.RhinoApp.WriteLine("Generative Print: errore nell'editor\n" + self.error)
+        Rhino.RhinoApp.WriteLine("Generative Print: editor error\n" + self.error)
 
     # ----------------------------------------------------------- sessione
     def find_target(self, doc):
@@ -714,17 +714,17 @@ class Editor(object):
         self.w_sym.MinValue, self.w_sym.MaxValue, self.w_sym.Value = 1, 64, 1
         self.w_sym.ValueChanged += lambda s_, e: self.guard(self.on_settings)
         self.w_mirror = ef.DropDown()
-        for text in ("Nessuno", "X (sinistra / destra)", "Y (davanti / dietro)"):
+        for text in ("None", "X (left / right)", "Y (front / back)"):
             self.w_mirror.Items.Add(text)
         self.w_mirror.SelectedIndex = 0
         self.w_mirror.SelectedIndexChanged += lambda s_, e: self.guard(self.on_settings)
-        self.w_connected = check("Solo la superficie toccata", s.connected if s else True, self.on_settings)
-        self.w_connected.ToolTip = "Il pennello non passa sull'altro lato di una parete sottile"
-        self.w_respect = check("Rispetta il limite di sbalzo", bool(s.respect) if s else False, self.on_settings)
-        self.w_respect.ToolTip = "A fine pennellata la zona toccata viene riportata sotto il limite"
-        self.w_heat = check("Mappa degli sbalzi", True, self.on_heat)
-        self.w_heat.ToolTip = "Arancio = vicino alla soglia, rosso = oltre"
-        self.w_layers = check("Strati", False, self.on_layers)
+        self.w_connected = check("Touched surface only", s.connected if s else True, self.on_settings)
+        self.w_connected.ToolTip = "The brush does not reach the other side of a thin wall"
+        self.w_respect = check("Respect the overhang limit", bool(s.respect) if s else False, self.on_settings)
+        self.w_respect.ToolTip = "At the end of the stroke the touched area is brought back under the limit"
+        self.w_heat = check("Overhang map", True, self.on_heat)
+        self.w_heat.ToolTip = "Orange = near the limit, red = over"
+        self.w_layers = check("Layers", False, self.on_layers)
         self.w_layer = slider(0, 100, 0, self.on_layers)
         self.w_layer.Enabled = False
         self.w_layer_info = label("", True)
@@ -738,31 +738,31 @@ class Editor(object):
         lay.Padding = ed.Padding(8)
         lay.Spacing = ed.Size(6, 7)
         lay.AddRow(self.w_status)
-        lay.AddRow(title("Pennello"))
+        lay.AddRow(title("Brush"))
         lay.AddRow(self.w_brush)
         lay.AddRow(self.w_help)
         lay.AddRow(table([(self.w_radius_l, self.w_radius), (self.w_strength_l, self.w_strength)]))
-        lay.AddRow(table([(button("Annulla", self.on_undo, "Annulla l'ultima pennellata"),
-                           button("Ripeti", self.on_redo, "Rifa la pennellata annullata"))]))
-        lay.AddRow(title("Simmetria"))
-        lay.AddRow(table([(label("Copie radiali"), self.w_sym), (label("Specchio"), self.w_mirror)]))
-        lay.AddRow(title("Maschera"))
-        lay.AddRow(table([(button("Cancella", self.on_mask_clear, "Toglie tutta la protezione"),
-                           button("Inverti", self.on_mask_invert, "Scambia zona protetta e zona libera"))]))
-        lay.AddRow(title("Opzioni"))
+        lay.AddRow(table([(button("Undo", self.on_undo, "Undo the last stroke"),
+                           button("Redo", self.on_redo, "Redo the undone stroke"))]))
+        lay.AddRow(title("Symmetry"))
+        lay.AddRow(table([(label("Radial copies"), self.w_sym), (label("Mirror"), self.w_mirror)]))
+        lay.AddRow(title("Mask"))
+        lay.AddRow(table([(button("Clear", self.on_mask_clear, "Removes all protection"),
+                           button("Invert", self.on_mask_invert, "Swaps protected and free areas"))]))
+        lay.AddRow(title("Options"))
         lay.AddRow(self.w_connected)
         lay.AddRow(self.w_respect)
         lay.AddRow(self.w_heat)
         lay.AddRow(table([(self.w_layers, self.w_layer)]))
         lay.AddRow(self.w_layer_info)
-        lay.AddRow(title("Azioni"))
-        lay.AddRow(table([(button("Verifica stampa", self.on_verify), button("Esporta STL", self.on_export)),
-                          (button("Nuova forma libera", self.on_new_blob),
-                           button("Nuova lampada", self.on_new_vessel, "Nuova lampada o vaso da scolpire")),
-                          (button("Applica e chiudi", self.on_apply, "Scrive la forma nel documento"), None)]))
+        lay.AddRow(title("Actions"))
+        lay.AddRow(table([(button("Check print", self.on_verify), button("Export STL", self.on_export)),
+                          (button("New free form", self.on_new_blob),
+                           button("New lamp", self.on_new_vessel, "New lamp or vase to sculpt")),
+                          (button("Apply and close", self.on_apply, "Writes the shape to the document"), None)]))
         lay.AddRow(self.w_report)
-        lay.AddRow(label("Sinistro: pennello. Ctrl: inverte. Shift: liscia. Ctrl+Shift e trascina: raggio "
-                         "(orizzontale) e forza (verticale). Destro: ruota la vista.", True))
+        lay.AddRow(label("Left: brush. Ctrl: inverts. Shift: smooths. Ctrl+Shift and drag: radius "
+                         "(horizontal) and strength (vertical). Right: rotates the view.", True))
         lay.AddRow(None)
         scroll = ef.Scrollable()
         scroll.Border = System.Enum.Parse(ef.BorderType, "None")
@@ -781,11 +781,11 @@ class Editor(object):
                 self.form, self.docked = scroll, True
             except Exception:
                 self.error = traceback.format_exc()
-                Rhino.RhinoApp.WriteLine("Generative Print: pannello agganciato non riuscito, apro una finestra\n"
+                Rhino.RhinoApp.WriteLine("Generative Print: docked panel failed, opening a window\n"
                                          + self.error)
         if not self.docked:
             form = ef.Form()
-            form.Title = "Generative Print - editor plastico"
+            form.Title = "Generative Print - sculpt editor"
             form.Resizable = True
             form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
             form.ClientSize = ed.Size(360, 820)
@@ -823,15 +823,15 @@ class Editor(object):
         self.w_radius.Value = int(round(s.radius))
         self.w_strength.Value = int(round(100 * s.strength))
         self.loading = False
-        self.w_radius_l.Text = "Raggio %d mm" % round(s.radius)
-        self.w_strength_l.Text = "Forza %d %%" % round(100 * s.strength)
+        self.w_radius_l.Text = "Radius %d mm" % round(s.radius)
+        self.w_strength_l.Text = "Strength %d %%" % round(100 * s.strength)
 
     def refresh_status(self):
         if self.form is None or self.session is None:
             return
         s = self.session
-        kind = "Pelle di lampada/vaso" if s.kind == "skin" else "Solido"
-        self.w_status.Text = ("%s, %d vertici. Sbalzo max %.0f gradi, oltre soglia %.0f mm2. Annulla: %d%s"
+        kind = "Lamp/vase skin" if s.kind == "skin" else "Solid"
+        self.w_status.Text = ("%s, %d vertices. Max overhang %.0f deg, over the limit %.0f mm2. Undo: %d%s"
                               % (kind, len(s.V), s.max_angle, s.over_area, len(s.undo_stack),
                                  (". " + s.respect_note) if s.respect_note else ""))
 
@@ -847,8 +847,8 @@ class Editor(object):
         s.connected = bool(self.w_connected.Checked)
         s.mirror = (None, "x", "y")[max(0, self.w_mirror.SelectedIndex)]
         self.w_help.Text = BRUSH_HELP[s.brush]
-        self.w_radius_l.Text = "Raggio %d mm" % self.w_radius.Value
-        self.w_strength_l.Text = "Forza %d %%" % self.w_strength.Value
+        self.w_radius_l.Text = "Radius %d mm" % self.w_radius.Value
+        self.w_strength_l.Text = "Strength %d %%" % self.w_strength.Value
 
     def on_heat(self):
         s = self.session
@@ -890,18 +890,18 @@ class Editor(object):
         self._mask(1.0 - self.session.mask)
 
     def on_verify(self):
-        self.w_report.Text = "Verifica in corso..."
+        self.w_report.Text = "Checking..."
         self.w_report.Text = self.session.verify()
 
     def on_export(self):
         import Eto.Forms as ef
         dlg = ef.SaveFileDialog()
-        dlg.Title = "Esporta STL"
+        dlg.Title = "Export STL"
         dlg.Filters.Add(ef.FileFilter("STL", ".stl"))
         if dlg.ShowDialog(Rhino.UI.RhinoEtoApp.MainWindow) == ef.DialogResult.Ok:
             path = dlg.FileName if dlg.FileName.lower().endswith(".stl") else dlg.FileName + ".stl"
             n = self.session.export_stl(path)
-            self.w_report.Text = self.session.verify() + "\n\nEsportato %s (%d triangoli)" % (path, n)
+            self.w_report.Text = self.session.verify() + "\n\nExported %s (%d triangles)" % (path, n)
 
     def on_new_blob(self):
         doc = self.session.doc if self.session else Rhino.RhinoDoc.ActiveDoc
