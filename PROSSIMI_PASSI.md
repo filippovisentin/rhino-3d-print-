@@ -15,7 +15,8 @@ Per lo stato completo e le prove già fatte: `RIPRESA.md`. Per le decisioni stab
 | Avvio e fine stampa della A1 mini (`generative_print/machine.py`) | fatto e provato sui profili veri |
 | Scrittura del G-code (`generative_print/gcode.py`) e suo controllo | fatto, provato su un cubo |
 | Interfaccia dei pannelli in inglese | fatto |
-| Percorsi veri di tutti gli strati | **da fare** |
+| Percorsi veri di tutti gli strati e pulsante «Generate G-code» | fatto, provato in Rhino sul tavolo di prova |
+| Confronto con Bambu sui percorsi veri | **da fare** |
 | Prima stampa vera | **da fare** |
 
 ## Passo 1 — Scrittura del G-code (nucleo, fuori da Rhino) — FATTO il 2026-11-15
@@ -48,7 +49,19 @@ Controllo da scrivere insieme (`gcode.check`): rilegge il testo e verifica che t
 
 Fatto quando: un cubo di prova dà un peso entro pochi punti percentuali dal calcolo a mano e il controllo passa.
 
-## Passo 2 — Percorsi veri in Rhino
+## Passo 2 — Percorsi veri in Rhino — FATTO il 2026-11-15
+
+Risultato su `prova_tavolo`: 175 strati scritti in 1-3 s, controllo superato; supporti aderenti 34,6 g, ad albero 20,0 g. L'anteprima a strati usa `Slicer.layer_paths`, la stessa funzione del file (pieno in viola, rado in azzurro).
+
+Limiti noti, da tenere presenti alla prima stampa:
+- una parete interna che in un punto si avvicina troppo a un'altra viene scartata tutta (resta un vuoto tra le pareti): manca il riempimento dei vuoti sottili;
+- la cucitura della parete esterna cade sul vertice piu vicino all'ugello, non in un punto scelto;
+- gli strati pieni si decidono su una griglia da 0,5 mm (cresce sui pezzi grandi): il bordo tra pieno e rado e a scalini;
+- niente ponti, niente rallentamento sugli sbalzi o sugli strati piccoli, niente pulitura a fine percorso;
+- i supporti si stampano alla larghezza piena della linea e toccano il pezzo di lato (nessuna distanza orizzontale);
+- mai provato su un pezzo grande (la lampada non entra nella A1 mini) ne interrotto con Esc durante la scrittura.
+
+Descrizione originale del passo:
 
 In `rhino/gp_slicer.py`:
 - tagliare tutti gli strati in una sola chiamata di `MeshPlane` (oggi uno strato alla volta: 0,2–0,4 s sulla lampada);
@@ -63,7 +76,7 @@ Fatto quando: la staffa di prova produce un file completo e l'anteprima a strati
 
 ## Passo 3 — Confronto e prima stampa
 
-1. Stesso pezzo con Bambu Studio e con il nostro G-code: confrontare peso, tempo e numero di strati.
+1. Stesso pezzo con Bambu Studio e con il nostro G-code: confrontare peso, tempo e numero di strati. Da spiegare subito: sul tavolo con l'albero Bambu dava 28,6 g e 1 h 45, noi 20,0 g e 44 min (piu 6 di avvio). Confrontare anche senza supporti, per separare il pezzo dai supporti. Aprire il nostro `.gcode` nell'anteprima di Bambu Studio per guardarlo strato per strato.
 2. Verificare che la A1 mini accetti un `.gcode` semplice dalla microSD (non ancora controllato).
 3. Prima stampa **sorvegliata** di un pezzo piccolo (cubo 20 mm), con la mano sul pulsante di arresto: l'avvio è quello ufficiale, ma i percorsi sono nostri e non sono mai stati stampati.
 4. Poi la staffa con i supporti.
@@ -81,6 +94,6 @@ Fatto quando: la staffa di prova produce un file completo e l'anteprima a strati
 - Bambu Studio deve restare installato: avvio e fine stampa si leggono dai suoi profili (`C:\Program Files\Bambu Studio\resources\profiles\BBL`). Non copiarli nel progetto: sono sotto la licenza di Bambu.
 - Il G-code prodotto dalla riga di comando di Bambu **non è stampabile** (avvio generico, spurgo fuori dal piatto): vale solo per i confronti.
 - Rhino si avvia con `Rhino.exe /nosplash /runscript="_MCPStart"`.
-- Test: `.venv/Scripts/python -m pytest -q tests` (70 test).
+- Test: `.venv/Scripts/python -m pytest -q tests` (74 test).
 - Interfaccia dei pannelli in inglese; documenti e commenti in italiano.
 - I file lunghi con triple virgolette vanno scritti su file e poi eseguiti: la shell non li accetta in linea.

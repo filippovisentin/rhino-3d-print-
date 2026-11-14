@@ -94,6 +94,11 @@ def test_retraction_and_lift_only_on_long_travels():
     assert L.count("G1 E-0.8 F1800") == 3 and L.count("G1 E0.8 F1800") == 2
     assert L.count("G1 Z0.6 F24000") == 2 and "G1 X30 Y10.4 F24000" in L
     assert gcode.check(res["text"])["ok"]
+    rows = [{"type": "support", "closed": False, "link": 4.0, "pts": np.array([[10.0, 10 + 2.5 * k], [30.0, 10 + 2.5 * k]])}
+            for k in range(4)]
+    zig = gcode.write([{"z": 0.2, "h": 0.2, "paths": rows}], START, END, CHANGE, FIL)       # righe unite a zig-zag
+    assert zig["retractions"] == 2 and zig["by_type"]["support"] == pytest.approx(4 * 20.0 + 3 * 2.5)
+    assert zig["travel_mm"] == pytest.approx(math.hypot(10, 10)) and gcode.check(zig["text"])["ok"]
 
 
 def test_speed_first_layer_flow_cap_fan_temperature_and_progress():

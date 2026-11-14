@@ -5,7 +5,9 @@ Ingresso: una lista di strati, dal basso. Ogni strato e un dizionario
 e ogni percorso
     {"type": "outer" | "inner" | "solid" | "sparse" | "support" | "interface",
      "pts": punti (N, 2) in mm nelle coordinate del piatto, "closed": True se e un anello,
-     "width": larghezza della linea (facoltativa)}.
+     "width": larghezza della linea (facoltativa),
+     "link": distanza in mm entro cui il percorso si attacca al precedente dello stesso tipo
+             estrudendo il raccordo (righe di riempimento a zig-zag), invece di spostarsi a vuoto}.
 
 Avvio e fine stampa non si scrivono qui: arrivano da `machine.start_end` (modelli ufficiali della
 stampante). Tra i due sta il nostro corpo, tra i segni `; GP_BODY_START` e `; GP_BODY_END`:
@@ -27,6 +29,7 @@ DEFAULTS = {
     "speed": {"outer": 120.0, "inner": 180.0, "solid": 150.0, "sparse": 200.0, "support": 120.0, "interface": 80.0},
     "first_layer_speed": 40.0, "travel_speed": 400.0, "z_speed": 12.0,
     "retract": 0.8, "retract_speed": 30.0, "z_hop": 0.4, "retract_min_travel": 1.5,
+    "support_min_travel": 10.0,      # tra un supporto e l'altro si ritira solo sui tratti lunghi
     "accel": 5000.0, "first_layer_accel": 500.0,
     "bed": (180.0, 180.0, 180.0),
     "prepare_s": 390.0,              # riscaldamento, livellamento e spurgo: ipotesi, non misurata
@@ -149,7 +152,7 @@ def write(layers, start, end, change, filament, settings=None):
                 out.append("M140 S%d" % round(filament["bed"]))
         if i == fan_layer:
             out.append("M106 S%d" % round(255.0 * float(filament.get("fan", 100.0)) / 100.0))
-        feature = None
+        feature, last = None, None
         for kind in ORDER:
             group = [p for p in layer["paths"] if p["type"] == kind and len(p["pts"]) >= 2]
             seq, _ = sequence(group, pos)
@@ -159,7 +162,10 @@ def write(layers, start, end, change, filament, settings=None):
                 e_mm = sec / fil_area
                 v = min(float(s["first_layer_speed"]) if i == 0 else float(speeds[kind]), max_flow / sec)
                 d = float(np.hypot(*(pts[0] - pos)))
-                if retracted or d > min_travel:
+                linked = not retracted and last == kind and 1e-4 < d <= float(p.get("link", 0.0))
+                if linked:
+                    pts = np.vstack([pos, pts])                 # il raccordo si estrude come il resto
+                elif retracted or d > (float(s["support_min_travel"]) if kind == last == "support" else min_travel):
                     if not retracted:
                         out.append("G1 E-%s F%d" % (_n(rl, 5), f_retract))
                         n_retract, t = n_retract + 1, t + rl / v_retract
@@ -169,8 +175,9 @@ def write(layers, start, end, change, filament, settings=None):
                     t += rl / v_retract + 2.0 * hop / v_z
                 elif d > 1e-4:
                     out.append("G1 X%s Y%s F%d" % (_n(pts[0][0]), _n(pts[0][1]), f_travel))
-                travel += d
-                t += _move_time(d, v_travel, acc)
+                if not linked:
+                    travel += d
+                    t += _move_time(d, v_travel, acc)
                 if feature != (kind, w):
                     out += ["; FEATURE: " + FEATURE[kind], "; LINE_WIDTH: " + _n(w)]
                     feature = (kind, w)
@@ -185,7 +192,7 @@ def write(layers, start, end, change, filament, settings=None):
                 length = float(seg.sum())
                 by_type[kind] += length
                 t += _move_time(length, v, acc)
-                pos = pts[-1]
+                pos, last = pts[-1], kind
         if not retracted:                                       # si cambia strato con il filo ritirato
             out.append("G1 E-%s F%d" % (_n(rl, 5), f_retract))
             retracted, n_retract, t = True, n_retract + 1, t + rl / v_retract

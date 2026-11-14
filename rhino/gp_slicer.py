@@ -35,7 +35,7 @@ for _p in (REPO, os.path.join(REPO, "rhino")):
 
 import gp_panel  # noqa: E402
 import gp_rhino  # noqa: E402
-from generative_print import bambu, checks, mesh_io, printcheck, slicer, supports  # noqa: E402
+from generative_print import bambu, checks, gcode, machine, mesh_io, printcheck, slicer, supports, toolpaths  # noqa: E402
 
 STICKY = "generative_print_slicer"
 MATERIALS = [("PLA", 1.24), ("PETG", 1.27), ("ABS", 1.04), ("ASA", 1.07), ("TPU", 1.21)]
@@ -43,6 +43,7 @@ PRINTABLE = (rg.Mesh, rg.Brep, rg.Extrusion, rg.SubD, rg.Surface)
 CLAY = (214, 208, 198)
 WALL_COLORS = [(235, 95, 25), (245, 170, 40), (250, 205, 90)]      # esterna, interne
 INFILL_COLOR = (60, 140, 215)
+SOLID_COLOR = (150, 90, 200)
 SUPPORT_COLOR = (40, 160, 90)
 SUPPORT_FACE_COLOR = (20, 110, 60)
 PAINT_MODES = [(None, "Off"), (1, "Force supports"), (-1, "Block supports"), (0, "Erase")]
@@ -169,7 +170,9 @@ class Job(object):
         self.sup_faces = None
         self.sup_lines, self.sup_base, self.sup_face, self.sup_circles = [], [], [], []
         self.walls = []           # (indice di parete, rg.Polyline)
-        self.infill = []          # rg.Line
+        self.infill = []          # rg.Line: riempimento rado
+        self.solid = []           # rg.Line: riempimento pieno
+        self.fill_ldi = None      # campionamento verticale per gli strati pieni (toolpaths.fill_grid)
         self.open_loops = []      # rg.Polyline non chiuse: mesh aperta a quella quota
 
     def layer_count(self, h):
@@ -219,6 +222,8 @@ class Conduit(Rhino.Display.DisplayConduit):
                     e.Display.DrawPolyline(pl, sd.Color.FromArgb(*c), 3 if k == 0 else 2)
                 if j.infill:
                     e.Display.DrawLines(j.infill, sd.Color.FromArgb(*INFILL_COLOR), 1)
+                if j.solid:
+                    e.Display.DrawLines(j.solid, sd.Color.FromArgb(*SOLID_COLOR), 1)
                 for pl in j.open_loops:
                     e.Display.DrawPolyline(pl, sd.Color.FromArgb(215, 45, 40), 4)
             elif j.face_sets is not None:
@@ -418,38 +423,35 @@ class Slicer(object):
         j, s = self.job, self.settings
         if j is None:
             return
-        h, lw = float(s["layer"]), float(s["line_width"])
+        h = float(s["layer"])
         n = j.layer_count(h)
         index = int(max(0, min(n - 1, index)))
         self.layer_index, self.layer_on = index, True
         zw = min((index + 0.5) * h, j.height - 1e-3)
         j.layer_faces = int_array(j.zorder[:int(np.searchsorted(j.zsorted, index * h + 1e-9, side="right"))])
         zworld = j.z0 + zw
-        plane = rg.Plane(rg.Point3d(0, 0, zworld), rg.Vector3d.ZAxis)
-        polys = rg.Intersect.Intersection.MeshPlane(j.mesh, plane) or []
-        closed = [p for p in polys if p.IsClosed and p.Count >= 4]
-        j.open_loops = [p for p in polys if not p.IsClosed]
-        walls, inner = self._walls(closed, plane, lw, int(s["walls"]))
-        j.walls = walls
-        solid = index < int(s["bottom_layers"]) or index >= n - int(s["top_layers"])
-        spacing = lw if solid else (lw / float(s["infill"]) if float(s["infill"]) > 0.001 else 0.0)
-        j.infill = []
-        fill_len = 0.0
-        if spacing > 0 and inner:
-            seg = slicer.hatch(inner, 45.0 if index % 2 == 0 else 135.0, spacing, min_length=2.0 * lw)
-            j.infill = [rg.Line(rg.Point3d(a[0], a[1], zworld), rg.Point3d(b[0], b[1], zworld))
-                        for a, b in seg.tolist()]
-            fill_len = float(np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1).sum()) if len(seg) else 0.0
-        wall_len = sum(pl.Length for _, pl in walls)
+        paths, count, j.open_loops = self.layer_paths(index, with_supports=False)
+        j.walls, j.infill, j.solid = [], [], []
+        length = {"outer": 0.0, "inner": 0.0, "solid": 0.0, "sparse": 0.0}
+        for p in paths:
+            pts = p["pts"].tolist()
+            if p["closed"]:
+                pl = rg.Polyline([rg.Point3d(x, y, zworld) for x, y in pts + pts[:1]])
+                j.walls.append((p["k"], pl))
+                length[p["type"]] += pl.Length
+            else:
+                ln = rg.Line(rg.Point3d(pts[0][0], pts[0][1], zworld), rg.Point3d(pts[1][0], pts[1][1], zworld))
+                (j.solid if p["type"] == "solid" else j.infill).append(ln)
+                length[p["type"]] += ln.Length
         self._support_draw()
-        self.layer_text = ("Layer %d / %d   z = %.2f mm   contours %d   walls %.0f mm   %s %.0f mm%s"
-                           % (index + 1, n, zw, len(closed), wall_len,
-                              "solid layer" if solid else "infill", fill_len,
-                              "   OPEN: %d" % len(j.open_loops) if j.open_loops else ""))
+        self.layer_text = ("Layer %d / %d   z = %.2f mm   contours %d   walls %.0f mm   solid %.0f mm   infill %.0f mm%s"
+                           % (index + 1, n, zw, count, length["outer"] + length["inner"], length["solid"],
+                              length["sparse"], "   OPEN: %d" % len(j.open_loops) if j.open_loops else ""))
         self.refresh()
         j.doc.Views.Redraw()
-        return {"index": index, "layers": n, "z": zw, "loops": len(closed), "walls": len(walls),
-                "wall_mm": wall_len, "infill_mm": fill_len, "solid": solid, "open": len(j.open_loops)}
+        return {"index": index, "layers": n, "z": zw, "loops": count, "walls": len(j.walls),
+                "wall_mm": length["outer"] + length["inner"], "infill_mm": length["sparse"],
+                "solid_mm": length["solid"], "open": len(j.open_loops)}
 
     def _face_sets(self):
         """Elenchi di facce per il disegno: ok, vicine alla soglia, oltre soglia, supporti forzati,
@@ -527,11 +529,13 @@ class Slicer(object):
                 for a, b in seg.tolist():
                     store.append(rg.Line(rg.Point3d(a[0], a[1], z0 + zw), rg.Point3d(b[0], b[1], z0 + zw)))
 
-    def _walls(self, closed, plane, lw, count, tol=0.01):
+    def _walls(self, closed, plane, lw, count, sp=None, tol=0.01):
         """Pareti di uno strato: contorni spostati verso il materiale di mezza linea, una linea e mezza...
         Un contorno spostato si accetta solo se resta ad almeno 0,8 linee da quelli gia accettati:
         nelle pareti sottili l'esterno e l'interno si incontrano e le linee non si sovrappongono.
-        Restituisce (pareti, contorni piu interni per il riempimento)."""
+        Restituisce (pareti, contorni del riempimento): questi stanno 0,8 linee dentro l'ultima parete
+        e sono orientati (pieni antiorari, fori orari) per `slicer.hatch(..., winding=True)`."""
+        sp = sp or lw
         curves = [p.ToPolylineCurve() for p in closed]
         depth = []
         for i, p in enumerate(closed):
@@ -539,7 +543,7 @@ class Slicer(object):
                              if k != i and c.Contains(p[0], plane, tol) == rg.PointContainment.Inside))
         areas = [poly_area(poly_xy(p)) for p in closed]
         order = sorted(range(len(closed)), key=lambda i: depth[i])
-        sign, accepted, walls, inner = {}, [], [], {}
+        sign, accepted, walls, fill = {}, [], [], []
 
         def run(i, d, sgn):
             try:
@@ -577,15 +581,109 @@ class Slicer(object):
 
         for k in range(count):
             for i in order:
-                for c, pl in offsets(i, lw * (k + 0.5)):
+                for c, pl in offsets(i, lw * 0.5 + k * sp):
                     if clear(c):
                         accepted.append(c)
                         walls.append((k, pl))
-                        if i in inner and inner[i][0] == k:
-                            inner[i][1].append(poly_xy(pl))
-                        else:
-                            inner[i] = (k, [poly_xy(pl)])
-        return walls, [p for _, ps in inner.values() for p in ps]
+        for i in order:
+            for c, pl in offsets(i, lw * 0.5 + (count - 1) * sp + 0.8 * lw):
+                p = poly_xy(pl)
+                x, y = p[:, 0], p[:, 1]
+                ccw = float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) > 0
+                fill.append(p if ccw == (depth[i] % 2 == 0) else p[::-1])
+        return walls, fill
+
+    # ----------------------------------------------------------- percorsi veri e G-code
+    def layer_paths(self, index, polys=None, with_supports=True):
+        """Percorsi veri dello strato 'index' nelle coordinate del modello (xy): gli stessi per
+        l'anteprima e per il G-code. Restituisce (percorsi, numero di contorni, contorni aperti)."""
+        j, s = self.job, self.settings
+        h, lw = float(s["layer"]), float(s["line_width"])
+        zw = min((index + 0.5) * h, j.height - 1e-3)
+        plane = rg.Plane(rg.Point3d(0, 0, j.z0 + zw), rg.Vector3d.ZAxis)
+        if polys is None:
+            polys = rg.Intersect.Intersection.MeshPlane(j.mesh, plane) or []
+        closed = [p for p in polys if p.IsClosed and p.Count >= 4]
+        walls, fill = self._walls(closed, plane, lw, max(1, int(s["walls"])), gcode.spacing(lw, h))
+        paths = [{"type": "outer" if k == 0 else "inner", "closed": True, "pts": poly_xy(pl), "k": k}
+                 for k, pl in walls]
+        if j.fill_ldi is None:
+            j.fill_ldi = toolpaths.fill_grid(j.Vw, j.F)
+        paths += toolpaths.fill_paths(fill, j.fill_ldi, zw, index, h, lw, float(s["infill"]),
+                                      int(s["bottom_layers"]), int(s["top_layers"]))
+        if with_supports and j.support is not None:
+            paths += toolpaths.support_paths(j.support, zw, h)
+        return paths, len(closed), [p for p in polys if not p.IsClosed]
+
+    def gcode_layers(self, progress=None, chunk=40):
+        """Tutti gli strati con i loro percorsi, spostati al centro del piatto. I piani si tagliano a
+        gruppi in una chiamata sola. progress(fatti, totale) puo restituire False per interrompere."""
+        j, s = self.job, self.settings
+        h, bed = float(s["layer"]), s["bed"]
+        n = j.layer_count(h)
+        dx, dy = bed[0] / 2.0 - j.centre[0], bed[1] / 2.0 - j.centre[1]
+        layers = []
+        for a in range(0, n, chunk):
+            idx = list(range(a, min(n, a + chunk)))
+            zs = np.array([j.z0 + min((i + 0.5) * h, j.height - 1e-3) for i in idx])
+            planes = System.Collections.Generic.List[rg.Plane]()
+            for z in zs.tolist():
+                planes.Add(rg.Plane(rg.Point3d(0, 0, z), rg.Vector3d.ZAxis))
+            groups = [[] for _ in idx]
+            for p in (rg.Intersect.Intersection.MeshPlane(j.mesh, planes) or []):
+                if p.Count:
+                    groups[int(np.abs(zs - p[0].Z).argmin())].append(p)
+            for i, polys in zip(idx, groups):
+                paths = self.layer_paths(i, polys)[0]
+                layers.append({"z": round((i + 1) * h, 6), "h": h, "paths": toolpaths.moved(paths, dx, dy)})
+            if progress is not None and progress(len(layers), n) is False:
+                return None
+        return layers
+
+    def write_gcode(self, path):
+        """Scrive il G-code pronto per la stampante. Il file nasce solo se il controllo passa."""
+        j, s, r = self.job, self.settings, self.result
+        self.extra = [l for l in self.extra if not l.startswith("G-code")]
+        if j is None or r is None or not r["closed"] or not r["fits"]:
+            self.extra.append("G-code: the mesh must be closed and fit the printer.")
+        elif self.printer not in machine.SUFFIX:
+            self.extra.append("G-code: no start sequence available for this printer.")
+        else:
+            t0 = time.time()
+
+            def progress(done, total):
+                Rhino.UI.StatusBar.UpdateProgressMeter(done, True)
+                Rhino.RhinoApp.Wait()
+                try:
+                    return not sc.escape_test(False)
+                except Exception:
+                    return True
+            Rhino.UI.StatusBar.ShowProgressMeter(0, j.layer_count(float(s["layer"])), "G-code", True, True)
+            try:
+                layers = self.gcode_layers(progress)
+            finally:
+                Rhino.UI.StatusBar.HideProgressMeter()
+            if layers is None:
+                self.extra.append("G-code: cancelled.")
+            else:
+                res = gcode.generate(layers, self.printer, self.material_name,
+                                     {"line_width": float(s["line_width"]), "bed": tuple(s["bed"])})
+                chk = res["check"]
+                self.gcode_result = dict((k, v) for k, v in res.items() if k != "text")
+                if chk["ok"]:
+                    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                        fh.write(res["text"])
+                    self.extra += ["G-code: " + path,
+                                   "G-code: %d layers, %.1f g, %.2f m of filament, print about %s (+ about %d min of "
+                                   "heating and levelling). Check passed. Written in %d s."
+                                   % (res["layers"], res["weight_g"], res["filament_mm"] / 1000.0,
+                                      gcode._clock(res["time_s"]), round((res["total_time_s"] - res["time_s"]) / 60.0),
+                                      time.time() - t0),
+                                   "G-code: never printed yet - watch the first print closely."]
+                else:
+                    self.extra += ["G-code: check FAILED, no file written."] + ["G-code: " + e for e in chk["errors"][:5]]
+        self.refresh()
+        return getattr(self, "gcode_result", None)
 
     # ----------------------------------------------------------- orientamento
     def _reoriented(self, R, note):
@@ -938,10 +1036,12 @@ class Slicer(object):
         lay.AddRow(table([(button("Check thickness", self.thickness),
                            button("Slice with Bambu", self.bambu_start,
                                   "Real slicer with the same settings: accurate weight and time")),
+                          (button("Generate G-code", self.on_gcode,
+                                  "Writes the print file for the printer, without Bambu Studio"), None),
                           (button("Export STL", self.on_export),
                            button("Sculpt", self.on_sculpt, "Sculpting brushes on a copy"))]))
         lay.AddRow(self.w_report)
-        note = label("Walls, infill and supports are a preview; for accurate weight and time: Slice with Bambu.")
+        note = label("The layer preview shows the paths that go into the G-code. Slice with Bambu is only a comparison.")
         note.Wrap = ef.WrapMode.Word
         lay.AddRow(note)
         lay.AddRow(None)
@@ -1041,6 +1141,17 @@ class Slicer(object):
             mesh_io.write_stl(path, self.job.Vw, self.job.F)
             self.extra.append("Exported " + path)
             self.refresh()
+
+    def on_gcode(self):
+        import Eto.Forms as ef
+        if self.job is None:
+            return
+        dlg = ef.SaveFileDialog()
+        dlg.Title = "Generate G-code"
+        dlg.Filters.Add(ef.FileFilter("G-code", ".gcode"))
+        if dlg.ShowDialog(Rhino.UI.RhinoEtoApp.MainWindow) == ef.DialogResult.Ok:
+            name = dlg.FileName
+            self.write_gcode(name if name.lower().endswith(".gcode") else name + ".gcode")
 
     def on_sculpt(self):
         import gp_editor

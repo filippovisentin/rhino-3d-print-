@@ -90,12 +90,14 @@ def loops_profile(V, F, layer=0.2, step_mm=1.0):
     return [(float(z), count_loops(V, F, z)) for z in zs]
 
 
-def hatch(loops, angle_deg, spacing, min_length=0.0):
+def hatch(loops, angle_deg, spacing, min_length=0.0, winding=False):
     """Tratteggio di riempimento dentro una regione piana (regola pari/dispari).
 
     loops: lista di poligoni chiusi (N x 2, senza ripetere il primo punto) che delimitano la regione,
     fori compresi. Restituisce i segmenti (K x 2 x 2) di rette parallele inclinate di angle_deg e
     distanti 'spacing', tagliate dentro la regione. I tratti piu corti di min_length si scartano.
+    Con winding=True conta il verso dei contorni (pieni antiorari, fori orari) e tiene dove il
+    numero di avvolgimenti e positivo: regge anche contorni che si accavallano.
     """
     segs = []
     for p in loops:
@@ -118,7 +120,18 @@ def hatch(loops, angle_deg, spacing, min_length=0.0):
         if not m.any():
             continue
         t = (y - y0[m]) / (y1[m] - y0[m])
-        xs = np.sort(T[m, 0, 0] + t * (T[m, 1, 0] - T[m, 0, 0]))
+        xs = T[m, 0, 0] + t * (T[m, 1, 0] - T[m, 0, 0])
+        if winding:
+            o = np.argsort(xs, kind="stable")
+            xs = xs[o]
+            w = np.cumsum(np.where(y0[m][o] > y1[m][o], 1, -1))      # lato sinistro di un antiorario: scende
+            on = np.r_[False, w > 0]
+            for k in np.where(on[1:] & ~on[:-1])[0]:
+                e = k + int(np.argmax(w[k:] <= 0)) if (w[k:] <= 0).any() else None
+                if e is not None and xs[e] - xs[k] >= min_length:
+                    out.append([[xs[k], y], [xs[e], y]])
+            continue
+        xs = np.sort(xs)
         for k in range(0, len(xs) - 1, 2):
             if xs[k + 1] - xs[k] >= min_length:
                 out.append([[xs[k], y], [xs[k + 1], y]])
