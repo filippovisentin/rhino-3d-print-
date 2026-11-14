@@ -61,6 +61,18 @@ Prove eseguite il 2026-11-14 (oggetto `prova_tavolo`: piano 60 x 60 x 5 mm su un
 | Maschera | Inverti e Annulla provati; i punti protetti non si muovono (test `tests/test_sculpt.py`) |
 | Pannelli | scheda nella barra dei Livelli (266 px), passaggio a un'altra scheda senza perdere la sessione, chiusura della scheda che chiude la sessione, comando `GPSlicer` eseguito |
 
+## Obiettivo nuovo: G-code scritto da Rhino, senza Bambu Studio (deciso il 2026-11-14)
+
+Scelte dell'utente: G-code pronto da stampare; stampante vera **Bambu Lab A1 mini**; il pulsante «Affetta con Bambu» resta come confronto facoltativo.
+
+Fatto: `generative_print/machine.py` (profili Bambu con catena `inherits`, valori del filamento, compilazione dei modelli di avvio, fine e cambio strato). Provato sui profili veri: avvio e fine della A1 mini si compilano senza segnaposto rimasti, con `G29 A1 X.. Y.. I.. J..` sulla zona del pezzo e temperatura del piatto dal profilo PLA. Esiste anche il profilo PETG per la A1 mini (nome con «0.4 nozzle»: `bambu.filament_profile` non lo trova, da correggere).
+
+Da fare, in ordine:
+1. `generative_print/gcode.py` (solo numpy): da strati di percorsi (parete esterna, interne, pieno, riempimento, supporto, interfaccia) a testo G-code: estrusione relativa (M83), sezione della linea (lw - h) * h + pi * (h/2)^2, ritrazione 0,8 mm con sollevamento sui trasferimenti oltre 1,5 mm, velocita per tipo con tetto di portata (mm3/s) dal filamento, primo strato lento, ventola dal secondo strato, `M73` e modello del cambio strato a ogni strato, intestazione `HEADER_BLOCK` con strati, tempo e peso. Piu un controllo che rilegge il testo: tutto dentro il piatto, estrusione totale uguale al calcolo, nessuna estrusione in aria.
+2. In `rhino/gp_slicer.py`: percorsi veri di tutti gli strati (le pareti ci sono gia in `_walls`; tagliare tutti i piani in una chiamata sola di `MeshPlane`), strati pieni locali ricavati dal campionamento verticale di `supports.ldi` (cella piena se il materiale sopra o sotto e meno di N strati), riempimento accorciato di 0,35 linee ai capi, supporti da `supports.layer_pattern` e `tree_sections`. Pezzo centrato sul piatto. Pulsante «Genera G-code» con barra di avanzamento e rapporto (peso e tempo dal G-code).
+3. Confronto con Bambu sullo stesso pezzo (peso, tempo, numero di strati) e prima stampa sorvegliata di un pezzo piccolo.
+4. Da verificare sulla macchina: che la A1 mini accetti un `.gcode` semplice dalla scheda microSD.
+
 ## Limiti noti (non nascondere)
 
 - Pareti e riempimento della vista sono un'**anteprima geometrica**, non un percorso di stampa: niente G-code nostro, niente ordine dei tratti, niente ritrazioni. Peso e tempo precisi li dà Bambu.
