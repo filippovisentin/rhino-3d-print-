@@ -31,11 +31,15 @@ DEFAULTS = {
     "retract": 0.8, "retract_speed": 30.0, "z_hop": 0.4, "retract_min_travel": 1.5,
     "support_min_travel": 10.0,      # tra un supporto e l'altro si ritira solo sui tratti lunghi
     "accel": 5000.0, "first_layer_accel": 500.0,
+    # raffreddamento: uno strato dura almeno layer_time secondi, rallentando fino a min_speed
+    # (valori di riserva: quelli veri arrivano dal profilo del filamento)
+    "layer_time": 6.0, "min_speed": 20.0,
     "bed": (180.0, 180.0, 180.0),
     "prepare_s": 390.0,              # riscaldamento, livellamento e spurgo: ipotesi, non misurata
     "start_xy": (0.0, 0.0),
 }
 BODY_START, BODY_END = "; GP_BODY_START", "; GP_BODY_END"
+MIN_SEGMENT = 0.02                   # mm: tratto piu corto che si scrive
 _WORD = re.compile(r"([XYZEF])(-?\d*\.?\d+)")
 
 
@@ -111,7 +115,8 @@ def sequence(paths, pos):
 def write(layers, start, end, change, filament, settings=None):
     """Testo del G-code completo. start / end / change / filament: come li da `machine.start_end`.
     Restituisce un dizionario: text, layers, time_s (solo stampa), total_time_s, filament_mm,
-    volume_mm3, weight_g, by_type (mm estrusi per tipo), travel_mm, retractions."""
+    volume_mm3, weight_g, by_type (mm estrusi per tipo), travel_mm, retractions, slowed_layers
+    (strati rallentati perche troppo brevi per raffreddarsi)."""
     if not layers:
         raise ValueError("nessuno strato da scrivere")
     s = dict(DEFAULTS)
@@ -133,14 +138,22 @@ def write(layers, start, end, change, filament, settings=None):
     total_e, travel, n_retract = 0.0, 0.0, 0
     by_type = dict((k, 0.0) for k in ORDER)
 
-    for i, layer in enumerate(layers):
+    cool_s = float(filament.get("layer_time", s["layer_time"]))
+    v_min = float(filament.get("min_speed", s["min_speed"]))
+    slowed = 0
+
+    def one(i, layer, pos, retracted, k):
+        """Uno strato con le velocita di stampa moltiplicate per k (mai sotto v_min).
+        Restituisce righe, tempo totale, tempo di sola estrusione, filo, spostamenti, ritrazioni,
+        mm per tipo, posizione finale e stato del filo."""
         z, h = float(layer["z"]), float(layer["h"])
         acc = float(s["first_layer_accel"] if i == 0 else s["accel"])
         out = ["; CHANGE_LAYER", "; Z_HEIGHT: " + _n(z), "; LAYER_HEIGHT: " + _n(h)]
-        t = 0.0
+        t, t_ext, e_sum, trav, n_ret = 0.0, 0.0, 0.0, 0.0, 0
+        by = dict((q, 0.0) for q in ORDER)
         if not retracted:
             out.append("G1 E-%s F%d" % (_n(rl, 5), f_retract))
-            retracted, n_retract, t = True, n_retract + 1, t + rl / v_retract
+            retracted, n_ret, t = True, n_ret + 1, t + rl / v_retract
         out.append(machine.render(change, {"layer_num": i, "total_layer_count": n, "layer_z": z}).strip())
         out.append(None)                                        # qui va M73, quando si conoscono i tempi
         if i < 2:
@@ -161,6 +174,7 @@ def write(layers, start, end, change, filament, settings=None):
                 sec = section(w, h) * ratio
                 e_mm = sec / fil_area
                 v = min(float(s["first_layer_speed"]) if i == 0 else float(speeds[kind]), max_flow / sec)
+                v = max(v * k, min(v, v_min))
                 d = float(np.hypot(*(pts[0] - pos)))
                 linked = not retracted and last == kind and 1e-4 < d <= float(p.get("link", 0.0))
                 if linked:
@@ -168,7 +182,7 @@ def write(layers, start, end, change, filament, settings=None):
                 elif retracted or d > (float(s["support_min_travel"]) if kind == last == "support" else min_travel):
                     if not retracted:
                         out.append("G1 E-%s F%d" % (_n(rl, 5), f_retract))
-                        n_retract, t = n_retract + 1, t + rl / v_retract
+                        n_ret, t = n_ret + 1, t + rl / v_retract
                     out += ["G1 Z%s F%d" % (_n(z + hop), f_travel), "G1 X%s Y%s" % (_n(pts[0][0]), _n(pts[0][1])),
                             "G1 Z%s" % _n(z), "G1 E%s F%d" % (_n(rl, 5), f_retract)]
                     retracted = False
@@ -176,26 +190,48 @@ def write(layers, start, end, change, filament, settings=None):
                 elif d > 1e-4:
                     out.append("G1 X%s Y%s F%d" % (_n(pts[0][0]), _n(pts[0][1]), f_travel))
                 if not linked:
-                    travel += d
+                    trav += d
                     t += _move_time(d, v_travel, acc)
                 if feature != (kind, w):
                     out += ["; FEATURE: " + FEATURE[kind], "; LINE_WIDTH: " + _n(w)]
                     feature = (kind, w)
                 out.append("G1 F%d" % round(v * 60))
-                seg = np.hypot(*(pts[1:] - pts[:-1]).T)
-                for q, dq in zip(pts[1:], seg):
-                    e = round(float(dq) * e_mm, 5)
-                    if dq < 1e-4 or e <= 0.0:
+                at, length = pts[0], 0.0
+                for q in pts[1:]:
+                    # un tratto piu corto di MIN_SEGMENT si fonde col successivo: scritto con tre
+                    # decimali non muoverebbe l'ugello, e il filo uscirebbe da fermi
+                    dq = float(math.hypot(q[0] - at[0], q[1] - at[1]))
+                    e = round(dq * e_mm, 5)
+                    if dq < MIN_SEGMENT or e <= 0.0:
                         continue
                     out.append("G1 X%s Y%s E%s" % (_n(q[0]), _n(q[1]), _n(e, 5)))
-                    total_e += e
-                length = float(seg.sum())
-                by_type[kind] += length
-                t += _move_time(length, v, acc)
-                pos, last = pts[-1], kind
+                    e_sum += e
+                    length += dq
+                    at = q
+                by[kind] += length
+                dt = _move_time(length, v, acc)
+                t, t_ext = t + dt, t_ext + dt
+                pos, last = at, kind
         if not retracted:                                       # si cambia strato con il filo ritirato
             out.append("G1 E-%s F%d" % (_n(rl, 5), f_retract))
-            retracted, n_retract, t = True, n_retract + 1, t + rl / v_retract
+            retracted, n_ret, t = True, n_ret + 1, t + rl / v_retract
+        return out, t, t_ext, e_sum, trav, n_ret, by, pos, retracted
+
+    for i, layer in enumerate(layers):
+        r = one(i, layer, pos, retracted, 1.0)
+        # strato troppo breve per raffreddarsi: si rallenta la stampa fino al tempo minimo del filamento
+        # (il primo strato no: e gia lento e sta sul piatto caldo)
+        k = 1.0
+        for _ in range(3):
+            if i == 0 or cool_s <= 0.0 or r[1] >= cool_s - 0.05 or r[2] <= 0.0:
+                break
+            k *= r[2] / (r[2] + cool_s - r[1])
+            r = one(i, layer, pos, retracted, k)
+        slowed += k < 1.0
+        out, t, _, e_sum, trav, n_ret, by, pos, retracted = r
+        total_e, travel, n_retract = total_e + e_sum, travel + trav, n_retract + n_ret
+        for q in ORDER:
+            by_type[q] += by[q]
         blocks.append(out)
         times.append(t)
 
@@ -223,7 +259,8 @@ def write(layers, start, end, change, filament, settings=None):
     L += [BODY_END, end.rstrip("\n"), "M73 P100 R0", "; EXECUTABLE_BLOCK_END", ""]
     return {"text": "\n".join(L), "layers": n, "time_s": print_s, "total_time_s": total_s,
             "filament_mm": total_e, "volume_mm3": volume, "weight_g": weight, "by_type": by_type,
-            "travel_mm": travel, "retractions": n_retract, "max_z": max_z}
+            "travel_mm": travel, "retractions": n_retract, "max_z": max_z,
+            "slowed_layers": int(slowed)}
 
 
 def generate(layers, printer="Bambu Lab A1 mini 0.4 nozzle", material="PLA", settings=None,

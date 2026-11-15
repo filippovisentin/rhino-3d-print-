@@ -52,6 +52,11 @@ SUPPORT_TYPES = [(None, "None"), ("grid", "Normal (grid)"), ("snug", "Normal (sn
                  ("tree", "Tree")]
 
 
+# I piani di taglio stanno poco sopra la mezza altezza dello strato: i modelli hanno spesso vertici
+# a quote tonde (0,1 - 0,5 - 3 mm) e un piano che li attraversa restituisce contorni aperti.
+NUDGE = 0.0013
+
+
 def int_array(values):
     """Array di interi .NET da numpy, copiando la memoria in blocco."""
     a = np.ascontiguousarray(values, dtype=np.int32)
@@ -90,6 +95,16 @@ def mesh_from_geometry(geo):
     m.Faces.ConvertQuadsToTriangles()
     m.Vertices.CombineIdentical(True, True)
     m.Compact()
+    if not m.IsClosed:
+        # la triangolazione fitta di un solido puo lasciare vertici a meta di uno spigolo vicino
+        # (visto su una scatola con feritoie): si spezzano gli spigoli perche combacino
+        try:
+            m.MatchEdges(0.01, True)
+            m.Faces.ConvertQuadsToTriangles()
+            m.Vertices.CombineIdentical(True, True)
+            m.Compact()
+        except Exception:
+            pass
     return m
 
 
@@ -435,14 +450,15 @@ class Slicer(object):
         length = {"outer": 0.0, "inner": 0.0, "solid": 0.0, "sparse": 0.0}
         for p in paths:
             pts = p["pts"].tolist()
-            if p["closed"]:
-                pl = rg.Polyline([rg.Point3d(x, y, zworld) for x, y in pts + pts[:1]])
+            if p["type"] in ("outer", "inner"):
+                pl = rg.Polyline([rg.Point3d(x, y, zworld) for x, y in pts + (pts[:1] if p["closed"] else [])])
                 j.walls.append((p["k"], pl))
                 length[p["type"]] += pl.Length
             else:
-                ln = rg.Line(rg.Point3d(pts[0][0], pts[0][1], zworld), rg.Point3d(pts[1][0], pts[1][1], zworld))
-                (j.solid if p["type"] == "solid" else j.infill).append(ln)
-                length[p["type"]] += ln.Length
+                for a, b in zip(pts[:-1], pts[1:]):               # le righe rade sono spezzate a zig-zag
+                    ln = rg.Line(rg.Point3d(a[0], a[1], zworld), rg.Point3d(b[0], b[1], zworld))
+                    (j.solid if p["type"] == "solid" else j.infill).append(ln)
+                    length[p["type"]] += ln.Length
         self._support_draw()
         self.layer_text = ("Layer %d / %d   z = %.2f mm   contours %d   walls %.0f mm   solid %.0f mm   infill %.0f mm%s"
                            % (index + 1, n, zw, count, length["outer"] + length["inner"], length["solid"],
@@ -529,12 +545,15 @@ class Slicer(object):
                 for a, b in seg.tolist():
                     store.append(rg.Line(rg.Point3d(a[0], a[1], z0 + zw), rg.Point3d(b[0], b[1], z0 + zw)))
 
-    def _walls(self, closed, plane, lw, count, sp=None, tol=0.01):
+    def _walls(self, closed, plane, lw, count, sp=None, tol=0.01, h=0.2):
         """Pareti di uno strato: contorni spostati verso il materiale di mezza linea, una linea e mezza...
-        Un contorno spostato si accetta solo se resta ad almeno 0,8 linee da quelli gia accettati:
-        nelle pareti sottili l'esterno e l'interno si incontrano e le linee non si sovrappongono.
-        Restituisce (pareti, contorni del riempimento): questi stanno 0,8 linee dentro l'ultima parete
-        e sono orientati (pieni antiorari, fori orari) per `slicer.hatch(..., winding=True)`."""
+        Ogni contorno spostato si adatta allo spazio lasciato dalle pareti gia accettate
+        (`toolpaths.fit_wall`): dove l'esterno e l'interno di una parete sottile si incontrano la linea
+        si stringe per riempire il vuoto, e dove non c'e posto sparisce solo quel tratto.
+        Restituisce (pareti, contorni del riempimento, misure): le pareti sono percorsi con "k"
+        (0 = esterna), "pts", "closed" e "width"; i contorni del riempimento stanno 0,8 linee dentro
+        l'ultima parete, orientati (pieni antiorari, fori orari) per `slicer.hatch(..., winding=True)`;
+        le misure sono i mm di parete esterna persi, di interna persi e di parete stretta."""
         sp = sp or lw
         curves = [p.ToPolylineCurve() for p in closed]
         depth = []
@@ -544,6 +563,7 @@ class Slicer(object):
         areas = [poly_area(poly_xy(p)) for p in closed]
         order = sorted(range(len(closed)), key=lambda i: depth[i])
         sign, accepted, walls, fill = {}, [], [], []
+        lost = [0.0, 0.0, 0.0]
 
         def run(i, d, sgn):
             try:
@@ -569,29 +589,22 @@ class Slicer(object):
                 return []
             return run(i, d, sign[i]) if sign[i] else []
 
-        def clear(c):
-            ts = c.DivideByCount(12, True)
-            for t in (ts or []):
-                pt = c.PointAt(t)
-                for a in accepted:
-                    ok, ta = a.ClosestPoint(pt)
-                    if ok and pt.DistanceTo(a.PointAt(ta)) < 0.8 * lw:
-                        return False
-            return True
-
         for k in range(count):
             for i in order:
                 for c, pl in offsets(i, lw * 0.5 + k * sp):
-                    if clear(c):
-                        accepted.append(c)
-                        walls.append((k, pl))
+                    pieces, thin, gone = toolpaths.fit_wall(poly_xy(pl), accepted, lw, h, between=k > 0)
+                    lost[0 if k == 0 else 1] += gone
+                    lost[2] += thin
+                    for piece in pieces:
+                        accepted.append(toolpaths.wall_record(piece["pts"], piece["closed"], piece["width"]))
+                        walls.append(dict(piece, k=k))
         for i in order:
             for c, pl in offsets(i, lw * 0.5 + (count - 1) * sp + 0.8 * lw):
                 p = poly_xy(pl)
                 x, y = p[:, 0], p[:, 1]
                 ccw = float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) > 0
                 fill.append(p if ccw == (depth[i] % 2 == 0) else p[::-1])
-        return walls, fill
+        return walls, fill, lost
 
     # ----------------------------------------------------------- percorsi veri e G-code
     def layer_paths(self, index, polys=None, with_supports=True):
@@ -600,13 +613,19 @@ class Slicer(object):
         j, s = self.job, self.settings
         h, lw = float(s["layer"]), float(s["line_width"])
         zw = min((index + 0.5) * h, j.height - 1e-3)
-        plane = rg.Plane(rg.Point3d(0, 0, j.z0 + zw), rg.Vector3d.ZAxis)
-        if polys is None:
-            polys = rg.Intersect.Intersection.MeshPlane(j.mesh, plane) or []
+        plane = rg.Plane(rg.Point3d(0, 0, j.z0 + zw + NUDGE), rg.Vector3d.ZAxis)
+        if polys is None or any(not p.IsClosed for p in polys):
+            # un piano che passa per i vertici della mesh da contorni spezzati: si riprova poco piu in la
+            for dz in (NUDGE, -NUDGE, 3.1 * NUDGE, -3.1 * NUDGE, 7.3 * NUDGE):
+                plane = rg.Plane(rg.Point3d(0, 0, j.z0 + zw + dz), rg.Vector3d.ZAxis)
+                polys = rg.Intersect.Intersection.MeshPlane(j.mesh, plane) or []
+                if all(p.IsClosed for p in polys):
+                    break
         closed = [p for p in polys if p.IsClosed and p.Count >= 4]
-        walls, fill = self._walls(closed, plane, lw, max(1, int(s["walls"])), gcode.spacing(lw, h))
-        paths = [{"type": "outer" if k == 0 else "inner", "closed": True, "pts": poly_xy(pl), "k": k}
-                 for k, pl in walls]
+        walls, fill, self.wall_lost = self._walls(closed, plane, lw, max(1, int(s["walls"])),
+                                                  gcode.spacing(lw, h), h=h)
+        paths = [{"type": "outer" if w["k"] == 0 else "inner", "closed": w["closed"], "pts": w["pts"],
+                  "k": w["k"], "width": w["width"]} for w in walls]
         if j.fill_ldi is None:
             j.fill_ldi = toolpaths.fill_grid(j.Vw, j.F)
         paths += toolpaths.fill_paths(fill, j.fill_ldi, zw, index, h, lw, float(s["infill"]),
@@ -615,9 +634,11 @@ class Slicer(object):
             paths += toolpaths.support_paths(j.support, zw, h)
         return paths, len(closed), [p for p in polys if not p.IsClosed]
 
-    def gcode_layers(self, progress=None, chunk=40):
+    def gcode_layers(self, progress=None, chunk=40, stats=None):
         """Tutti gli strati con i loro percorsi, spostati al centro del piatto. I piani si tagliano a
-        gruppi in una chiamata sola. progress(fatti, totale) puo restituire False per interrompere."""
+        gruppi in una chiamata sola. progress(fatti, totale) puo restituire False per interrompere.
+        stats: lista da riempire, per ogni strato [contorni chiusi, contorni aperti, mm di parete
+        esterna persi, mm di interna persi, mm di parete stretta]: dice dove manca lo spazio."""
         j, s = self.job, self.settings
         h, bed = float(s["layer"]), s["bed"]
         n = j.layer_count(h)
@@ -625,7 +646,7 @@ class Slicer(object):
         layers = []
         for a in range(0, n, chunk):
             idx = list(range(a, min(n, a + chunk)))
-            zs = np.array([j.z0 + min((i + 0.5) * h, j.height - 1e-3) for i in idx])
+            zs = np.array([j.z0 + min((i + 0.5) * h, j.height - 1e-3) + NUDGE for i in idx])
             planes = System.Collections.Generic.List[rg.Plane]()
             for z in zs.tolist():
                 planes.Add(rg.Plane(rg.Point3d(0, 0, z), rg.Vector3d.ZAxis))
@@ -634,7 +655,9 @@ class Slicer(object):
                 if p.Count:
                     groups[int(np.abs(zs - p[0].Z).argmin())].append(p)
             for i, polys in zip(idx, groups):
-                paths = self.layer_paths(i, polys)[0]
+                paths, n_closed, opened = self.layer_paths(i, polys)
+                if stats is not None:
+                    stats.append([n_closed, len(opened)] + list(self.wall_lost))
                 layers.append({"z": round((i + 1) * h, 6), "h": h, "paths": toolpaths.moved(paths, dx, dy)})
             if progress is not None and progress(len(layers), n) is False:
                 return None
@@ -660,7 +683,8 @@ class Slicer(object):
                     return True
             Rhino.UI.StatusBar.ShowProgressMeter(0, j.layer_count(float(s["layer"])), "G-code", True, True)
             try:
-                layers = self.gcode_layers(progress)
+                self.layer_stats = []
+                layers = self.gcode_layers(progress, stats=self.layer_stats)
             finally:
                 Rhino.UI.StatusBar.HideProgressMeter()
             if layers is None:
@@ -679,6 +703,7 @@ class Slicer(object):
                                    % (res["layers"], res["weight_g"], res["filament_mm"] / 1000.0,
                                       gcode._clock(res["time_s"]), round((res["total_time_s"] - res["time_s"]) / 60.0),
                                       time.time() - t0),
+                                   "G-code: %d short layers slowed down so they can cool." % res["slowed_layers"],
                                    "G-code: never printed yet - watch the first print closely."]
                 else:
                     self.extra += ["G-code: check FAILED, no file written."] + ["G-code: " + e for e in chk["errors"][:5]]

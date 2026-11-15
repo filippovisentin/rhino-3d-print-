@@ -146,3 +146,20 @@ def test_real_a1_mini_file_is_complete():
     assert text.index("M1002 gcode_claim_action") < text.index(gcode.BODY_START) < text.index(gcode.BODY_END)
     assert "M991 S0 P9 ;notify layer change" in text and "G1 Z2.4 F900" in text.split(gcode.BODY_END)[1]
     assert res["filament"]["flow_ratio"] == pytest.approx(0.98)
+
+
+def test_short_layers_slow_down_to_cool():
+    # colonnina 6 x 6 mm: ogni strato durerebbe meno di un secondo
+    fil = dict(FIL, layer_time=6.0, min_speed=20.0)
+    fast = gcode.write(cube_layers(side=6.0, count=5), START, END, CHANGE, dict(fil, layer_time=0.0))
+    slow = gcode.write(cube_layers(side=6.0, count=5), START, END, CHANGE, fil)
+    assert fast["slowed_layers"] == 0 and slow["slowed_layers"] == 4          # il primo strato non si tocca
+    assert slow["filament_mm"] == pytest.approx(fast["filament_mm"])          # stesso materiale, solo piu lento
+    speeds = [float(l[4:]) / 60.0 for l in body(slow["text"]) if re.match(r"G1 F\d+$", l)]
+    assert min(speeds) >= 20.0 - 1e-6
+    per_layer = (slow["time_s"] - fast["time_s"]) / 4.0 + fast["time_s"] / 5.0
+    assert 3.0 < per_layer <= 6.5                                             # verso i 6 s, col limite dei 20 mm/s
+    assert gcode.check(slow["text"])["ok"]
+    # uno strato grande resta alla sua velocita
+    big = gcode.write(cube_layers(count=3), START, END, CHANGE, fil)
+    assert big["slowed_layers"] == 0

@@ -54,6 +54,9 @@ def filament_values(printer, material="PLA", root=PROFILES):
             "bed_first": num("textured_plate_temp_initial_layer", 65), "bed": num("textured_plate_temp", 65),
             "max_flow": flow, "density": num("filament_density", 1.24),
             "diameter": num("filament_diameter", 1.75), "flow_ratio": num("filament_flow_ratio", 1.0),
+            # raffreddamento: durata minima di uno strato e velocita sotto cui non si scende
+            "layer_time": num("slow_down_layer_time", 6) if num("slow_down_for_layer_cooling", 1) else 0.0,
+            "min_speed": num("slow_down_min_speed", 20),
             "fan": num("fan_max_speed", 100), "fan_off_layers": int(num("close_fan_the_first_x_layers", 1)),
             # come fa Bambu Studio: se il profilo non da un valore di spurgo, usa il massimo del filamento
             "flush_temp": num("filament_flush_temp") or high,

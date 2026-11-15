@@ -71,10 +71,14 @@ Fatto il 2026-11-15 il punto 1: `gcode.write` / `gcode.generate` / `gcode.check`
 
 Fatto il 2026-11-15 anche il punto 2 (percorsi veri in Rhino, pulsante «Generate G-code»). Misure su `prova_tavolo` (60 x 60 x 35, PLA, 15 %): supporti aderenti 34,6 g, 52 min di sola stampa stimati, 1.044 ritrazioni; ad albero 20,0 g, 44 min, 1.489 ritrazioni; scrittura in 1-3 s. Bambu sullo stesso pezzo con l'albero dava 28,6 g e 1 h 45: la differenza NON e ancora spiegata (supporti diversi, tempo nostro senza rallentamenti in curva): e il primo lavoro del punto 3.
 
+Fatto il 2026-11-15 il confronto con Bambu sul tavolo (tabella e spiegazione in `PROSSIMI_PASSI.md`, passo 3.1): senza supporti 15,7 g e 31 min contro 16,7 g e 35 min; albero 23,5 g e 50 min contro 28,6 g e 1 h 46 (Bambu: piu supporto, interfaccia, 9.737 ritrazioni); aderenti 37,2 g e 57 min contro 36,3 g e 53 min. Aggiunto il rallentamento degli strati brevi. 75 test.
+
+Fatte il 2026-11-15 le prove su sei pezzi veri (`rhino/gp_prove.py`: staffa, ingranaggio, scatola, gancio, vite filettata, vaso): trovati e corretti cinque difetti (strati persi sui vertici, solido non chiuso, tratti minuscoli, vuoto nelle pareti sottili, raccordi del rado sul vuoto). Pesi entro -16 % / +1 % da Bambu. Tabella in `PROSSIMI_PASSI.md`, passo 3.1 bis. 80 test.
+
 Da fare, in ordine:
 1. (FATTO) `generative_print/gcode.py` (solo numpy): da strati di percorsi (parete esterna, interne, pieno, riempimento, supporto, interfaccia) a testo G-code: estrusione relativa (M83), sezione della linea (lw - h) * h + pi * (h/2)^2, ritrazione 0,8 mm con sollevamento sui trasferimenti oltre 1,5 mm, velocita per tipo con tetto di portata (mm3/s) dal filamento, primo strato lento, ventola dal secondo strato, `M73` e modello del cambio strato a ogni strato, intestazione `HEADER_BLOCK` con strati, tempo e peso. Piu un controllo che rilegge il testo: tutto dentro il piatto, estrusione totale uguale al calcolo, nessuna estrusione in aria.
 2. In `rhino/gp_slicer.py`: percorsi veri di tutti gli strati (le pareti ci sono gia in `_walls`; tagliare tutti i piani in una chiamata sola di `MeshPlane`), strati pieni locali ricavati dal campionamento verticale di `supports.ldi` (cella piena se il materiale sopra o sotto e meno di N strati), riempimento accorciato di 0,35 linee ai capi, supporti da `supports.layer_pattern` e `tree_sections`. Pezzo centrato sul piatto. Pulsante «Genera G-code» con barra di avanzamento e rapporto (peso e tempo dal G-code).
-3. Confronto con Bambu sullo stesso pezzo (peso, tempo, numero di strati) e prima stampa sorvegliata di un pezzo piccolo.
+3. (confronto FATTO) Prima stampa sorvegliata di un pezzo piccolo.
 4. Da verificare sulla macchina: che la A1 mini accetti un `.gcode` semplice dalla scheda microSD.
 
 ## Limiti noti (non nascondere)

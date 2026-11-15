@@ -119,7 +119,60 @@ def fill_paths(loops, L, z, index, h, line_width, infill, bottom, top):
         seg = slicer.hatch(loops, angle, line_width / infill, min_length=2.0 * line_width, winding=True)
         if skin:
             seg = clip_segments(seg, L, mask, False, min_length=2.0 * line_width)
-        out += [{"type": "sparse", "closed": False, "pts": s, "link": min(1.6 * line_width / infill, 8.0)} for s in seg]
+        # le righe rade si uniscono qui, e non nel G-code: il raccordo e lungo e va controllato che
+        # resti dentro il riempimento (tra due denti o attorno a un foro passerebbe sul vuoto)
+        out += [{"type": "sparse", "closed": False, "pts": s}
+                for s in chain(seg, loops, min(1.6 * line_width / infill, 8.0))]
+    return out
+
+
+def inside(points, loops):
+    """Vero per i punti dentro i contorni orientati (regola degli avvolgimenti, come `slicer.hatch`)."""
+    P = np.asarray(points, dtype=float)
+    wind = np.zeros(len(P), dtype=np.int64)
+    for loop in loops:
+        A = np.asarray(loop, dtype=float)[:, :2]
+        B = np.roll(A, -1, axis=0)
+        ax, ay, bx, by = A[:, 0][None], A[:, 1][None], B[:, 0][None], B[:, 1][None]
+        px, py = P[:, 0][:, None], P[:, 1][:, None]
+        left = (bx - ax) * (py - ay) - (px - ax) * (by - ay)
+        up = (ay <= py) & (by > py) & (left > 0)
+        down = (ay > py) & (by <= py) & (left < 0)
+        wind += up.sum(axis=1) - down.sum(axis=1)
+    return wind != 0
+
+
+def chain(segs, loops, max_link):
+    """Unisce a zig-zag i segmenti (K, 2, 2) vicini: da ogni capo si passa al capo libero piu vicino
+    entro max_link, ma solo se il raccordo resta dentro `loops`. Restituisce spezzate di punti."""
+    segs = np.asarray(segs, dtype=float)
+    if len(segs) == 0:
+        return []
+    free = np.ones(len(segs), dtype=bool)
+    ends = segs.reshape(-1, 2)                                   # capo 2k = inizio, 2k + 1 = fine
+    out = []
+    for first in range(len(segs)):
+        if not free[first]:
+            continue
+        free[first] = False
+        line = [segs[first, 0], segs[first, 1]]
+        while True:
+            d = np.hypot(ends[:, 0] - line[-1][0], ends[:, 1] - line[-1][1])
+            d[~np.repeat(free, 2)] = np.inf
+            nxt = None
+            for e in np.argsort(d)[:4]:
+                if d[e] > max_link:
+                    break
+                mid = line[-1] + np.array([[0.25], [0.5], [0.75]]) * (ends[e] - line[-1])
+                if d[e] < 1e-6 or inside(mid, loops).all():
+                    nxt = int(e)
+                    break
+            if nxt is None:
+                break
+            k = nxt // 2
+            free[k] = False
+            line += [ends[nxt], ends[nxt ^ 1]]
+        out.append(np.array(line))
     return out
 
 
@@ -141,3 +194,118 @@ def moved(paths, dx, dy):
     """Gli stessi percorsi spostati sul piatto."""
     off = np.array([dx, dy], dtype=float)
     return [dict(p, pts=np.asarray(p["pts"], dtype=float)[:, :2] + off) for p in paths]
+
+
+# ----------------------------------------------------------------- pareti che si adattano allo spazio
+W_MIN = 0.2          # mm: linea piu stretta che si stampa (ugello da 0,4)
+
+
+def wall_record(pts, closed, width):
+    """Una parete gia accettata, pronta per le misure di distanza di `fit_wall`."""
+    P = np.asarray(pts, dtype=float)[:, :2]
+    A, B = (P, np.roll(P, -1, axis=0)) if closed else (P[:-1], P[1:])
+    return {"A": A, "B": B, "width": float(width), "lo": P.min(axis=0), "hi": P.max(axis=0)}
+
+
+def _distance(Q, A, B, budget=1000000):
+    """Distanza di ogni punto Q (n, 2) dalla spezzata di segmenti A-B (m, 2)."""
+    ax, ay = A[:, 0][None], A[:, 1][None]
+    dx, dy = (B[:, 0] - A[:, 0])[None], (B[:, 1] - A[:, 1])[None]
+    L2 = np.maximum(dx * dx + dy * dy, 1e-18)
+    out = np.empty(len(Q))
+    step = max(1, budget // max(len(A), 1))
+    for s in range(0, len(Q), step):
+        px, py = Q[s:s + step, 0][:, None] - ax, Q[s:s + step, 1][:, None] - ay
+        t = np.clip((px * dx + py * dy) / L2, 0.0, 1.0)
+        px -= t * dx
+        py -= t * dy
+        out[s:s + step] = np.sqrt((px * px + py * py).min(axis=1))
+    return out
+
+
+def _near_distance(Q, a, reach):
+    """Come `_distance`, ma solo dove serve: i punti di Q entro `reach` dall'ingombro della parete `a`
+    e i suoi segmenti entro `reach` da quei punti. Altrove restituisce infinito."""
+    out = np.full(len(Q), np.inf)
+    qm = np.all((Q >= a["lo"] - reach) & (Q <= a["hi"] + reach), axis=1)
+    if not qm.any():
+        return out
+    Qn = Q[qm]
+    lo, hi = Qn.min(axis=0) - reach, Qn.max(axis=0) + reach
+    A, B = a["A"], a["B"]
+    sm = np.all((np.maximum(A, B) >= lo) & (np.minimum(A, B) <= hi), axis=1)
+    if sm.any():
+        out[qm] = _distance(Qn, A[sm], B[sm])
+    return out
+
+
+def fit_wall(pts, accepted, line_width, h, step=0.4, w_min=W_MIN, tol=0.05, spread=0.1, between=True):
+    """Adatta una parete candidata (anello chiuso di punti) allo spazio lasciato da quelle gia accettate.
+
+    Due linee di larghezza w1 e w2 riempiono senza sovrapporsi se i loro assi distano
+    (w1 + w2) / 2 - h (1 - pi / 4): da qui, punto per punto, la larghezza che ci sta. Dove ci sta la
+    linea intera la parete resta com'e; dove c'e meno spazio (pareti sottili: l'esterno e l'interno si
+    incontrano) diventa una linea piu stretta che riempie il vuoto; sotto w_min sparisce.
+    between=True (pareti interne): la linea sta tra due vicine, quella del suo stesso contorno e
+    un'altra, e prende tutto lo spazio tra le due anche se non e proprio al centro (fino a 0,1 mm
+    di scarto). between=False (parete esterna): da un lato c'e il bordo del pezzo, che non si sposta.
+    Restituisce (pezzi, mm stretti, mm scartati); ogni pezzo e {"pts", "closed", "width"}."""
+    P = np.asarray(pts, dtype=float)[:, :2]
+    if len(P) < 3:
+        return [], 0.0, 0.0
+    c = h * (1.0 - math.pi / 4.0)
+    near = [a for a in accepted if np.all(a["lo"] - line_width <= P.max(axis=0))
+            and np.all(a["hi"] + line_width >= P.min(axis=0))]
+    if not near:
+        return [{"pts": P, "closed": True, "width": line_width}], 0.0, 0.0
+    nxt = np.roll(P, -1, axis=0)
+    edge = np.hypot(*(nxt - P).T)
+    n = np.maximum(np.ceil(edge / step).astype(np.int64), 1)
+    sid = np.repeat(np.arange(len(P)), n)
+    loc = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    Q = P[sid] + (loc / n[sid])[:, None] * (nxt - P)[sid]          # anello infittito; loc == 0: vertice vero
+    v1, v2 = np.full(len(Q), np.inf), np.full(len(Q), np.inf)     # spazio libero verso le due piu vicine
+    for a in near:
+        v = _near_distance(Q, a, line_width + a["width"]) - a["width"] / 2.0
+        v2 = np.minimum(v2, np.maximum(v1, v))
+        v1 = np.minimum(v1, v)
+    w = (v1 + np.minimum(v2, v1 + 0.2) + 2.0 * c) if between else 2.0 * (v1 + c)
+    w = np.minimum(w, float(line_width))
+    w[w >= line_width - tol] = line_width
+    if np.all(w >= line_width):
+        return [{"pts": P, "closed": True, "width": line_width}], 0.0, 0.0
+    ok = w >= w_min
+    seg = np.hypot(*(np.roll(Q, -1, axis=0) - Q).T)
+    lost = float(seg[~ok].sum())
+    if not ok.any():
+        return [], 0.0, lost
+    m = len(Q)
+    start = int(np.flatnonzero(~ok)[0]) if not ok.all() else int(np.argmin(w))
+    order = (np.arange(m + (1 if ok.all() else 0)) + start) % m    # giro che parte da un punto di taglio
+    pieces, thin, k = [], 0.0, 0
+    while k < len(order):
+        if not ok[order[k]]:
+            k += 1
+            continue
+        e, lo, hi = k, w[order[k]], w[order[k]]
+        while e + 1 < len(order) and ok[order[e + 1]]:
+            lo2, hi2 = min(lo, w[order[e + 1]]), max(hi, w[order[e + 1]])
+            if hi2 - lo2 > spread:
+                break
+            e, lo, hi = e + 1, lo2, hi2
+        idx = order[k:e + 1]
+        if e + 1 < len(order) and ok[order[e + 1]]:
+            idx = order[k:e + 2]                                    # il pezzo dopo riparte dallo stesso punto
+        keep = np.ones(len(idx), dtype=bool)
+        keep[1:-1] = loc[idx[1:-1]] == 0                            # dentro restano solo i vertici veri
+        pts_k = Q[idx][keep]
+        length = float(np.hypot(*(pts_k[1:] - pts_k[:-1]).T).sum()) if len(pts_k) > 1 else 0.0
+        width = float(np.clip(w[order[k:e + 1]].mean(), w_min, line_width))
+        if length >= 2.0 * w_min:
+            pieces.append({"pts": pts_k, "closed": False, "width": width})
+            if width < line_width - 1e-9:
+                thin += length
+        else:
+            lost += length
+        k = e + 1
+    return pieces, thin, lost
