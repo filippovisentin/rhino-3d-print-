@@ -69,8 +69,14 @@ def int_array(values):
     return out
 
 
-def mesh_from_geometry(geo):
-    """Mesh triangolata e saldata da un oggetto di Rhino; None se il tipo non e stampabile."""
+def mm_per_unit(doc):
+    """Millimetres in one model unit of the document (1 for mm, 10 for cm, 25.4 for inches)."""
+    return Rhino.RhinoMath.UnitScale(doc.ModelUnitSystem, Rhino.UnitSystem.Millimeters)
+
+
+def mesh_from_geometry(geo, unit=1.0):
+    """Mesh triangolata e saldata da un oggetto di Rhino; None se il tipo non e stampabile.
+    unit: mm per unita del documento (serve solo al lato minimo dei triangoli, 2 mm)."""
     if isinstance(geo, rg.Mesh):
         m = geo.DuplicateMesh()
     elif isinstance(geo, rg.SubD):
@@ -81,7 +87,7 @@ def mesh_from_geometry(geo):
             return None
         mp = rg.MeshingParameters.QualityRenderMesh
         # triangoli non troppo grandi: la pittura dei supporti lavora per faccia
-        mp.MaximumEdgeLength = max(2.0, brep.GetBoundingBox(False).Diagonal.Length / 80.0)
+        mp.MaximumEdgeLength = max(2.0 / unit, brep.GetBoundingBox(False).Diagonal.Length / 80.0)
         mp.SimplePlanes = False
         mp.RefineGrid = True
         parts = rg.Mesh.CreateFromBrep(brep, mp)
@@ -141,19 +147,23 @@ def poly_area(pts):
 
 
 class Job(object):
-    """Gli oggetti da stampare, uniti in una mesh sola (posizione del modello) e appoggiati al piano."""
+    """Gli oggetti da stampare, uniti in una mesh sola (posizione del modello) e appoggiati al piano.
+    Tutto il calcolo e in millimetri; to_doc riporta le coordinate nelle unita del documento."""
 
     def __init__(self, doc, objs):
         self.doc = doc
         self.obj_ids = [o.Id for o in objs]
         names = [o.Attributes.Name or o.ObjectType.ToString() for o in objs]
         self.name = names[0] if len(names) == 1 else "%d objects" % len(names)
+        self.unit = mm_per_unit(doc)                               # mm per unita del documento
+        self.to_doc = rg.Transform.Scale(rg.Point3d.Origin, 1.0 / self.unit)
         joined = rg.Mesh()
         for o in objs:
-            m = mesh_from_geometry(o.Geometry)
+            m = mesh_from_geometry(o.Geometry, self.unit)
             if m is not None:
                 joined.Append(m)
         self.V0, self.F = gp_rhino.from_rhino_mesh(joined)        # come disegnato
+        self.V0 = self.V0 * self.unit                              # in mm
         if len(self.F) == 0:
             raise ValueError("No printable geometry in the chosen objects")
         self.paint = np.zeros(len(self.F), dtype=np.int8)     # supporti dipinti: +1 forza, -1 vieta
@@ -202,13 +212,22 @@ class Conduit(Rhino.Display.DisplayConduit):
     def CalculateBoundingBox(self, e):
         j = self.sl.job
         if j is not None:
-            e.IncludeBoundingBox(j.mesh.GetBoundingBox(False))
+            bb = j.mesh.GetBoundingBox(False)
+            bb.Transform(j.to_doc)
+            e.IncludeBoundingBox(bb)
 
     def PostDrawObjects(self, e):
         sl = self.sl
         j = sl.job
         if j is None:
             return
+        e.Display.PushModelTransform(j.to_doc)    # anteprima calcolata in mm, disegnata nelle unita del documento
+        try:
+            self._draw(e, sl, j)
+        finally:
+            e.Display.PopModelTransform()
+
+    def _draw(self, e, sl, j):
         try:
             bed = sl.settings["bed"]
             fits = sl.result is None or sl.result["fits"]
@@ -272,6 +291,7 @@ class PaintMouse(Rhino.UI.MouseCallback):
         if j is None or sl.paint_mode is None or sl.layer_on or e.View is None:
             return None
         line = e.View.ActiveViewport.ClientToWorld(e.ViewportPoint)
+        line = rg.Line(line.From * j.unit, line.To * j.unit)   # la mesh di calcolo e in mm
         d = line.From - line.To
         d.Unitize()
         t = rg.Intersect.Intersection.MeshRay(j.mesh, rg.Ray3d(line.To, d))
@@ -759,7 +779,7 @@ class Slicer(object):
         for r in range(3):
             for k in range(3):
                 xf[r, k] = float(j.R[r, k])
-            xf[r, 3] = float(shift[r])
+            xf[r, 3] = float(shift[r]) / j.unit      # spostamento in unita del documento
         doc, ids = j.doc, list(j.obj_ids)
         sn = doc.BeginUndoRecord("Generative Print: print orientation")
         for oid in ids:
@@ -881,6 +901,7 @@ class Slicer(object):
         m.Faces.ConvertQuadsToTriangles()
         m.Vertices.CombineIdentical(True, True)
         m.Compact()
+        m.Transform(j.to_doc)                        # dai mm di calcolo alle unita del documento
         m.Normals.ComputeNormals()
         doc, ids = j.doc, list(j.obj_ids)
         gp_rhino.remove_named(doc, "gp_scolpibile")
